@@ -1,0 +1,676 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+# Load packages
+```{r}
+#install.packages("dplyr")
+#install.packages("QCA")
+#install.packages("forcats")
+#install.packages("psych")
+#install.packages("writexl")
+#install.packages(c("knitr", "kableExtra"))
+
+# Load the packages
+library(knitr)
+library(kableExtra)
+library(writexl)
+library(psych)
+library(dplyr)
+library(QCA)
+library(forcats)
+```
+# Initializing fsQCA
+```{r}
+# Open data file  
+datafile <- read.csv("/Users/fionageorginahansen/Desktop/ETH\ Zürich/Master/4.\ Semester/fsQCA/Results/Results.csv")
+#datafile[datafile == ""] <- NA # if there are no answers code as I don't know = neither agree nor disagree
+
+# Splitting the table into three parts: 1 analysis per material  
+Demographic <- datafile[,3:5]
+General_0 <- datafile[,6:49]
+Steel_0 <- cbind(datafile[,73:98], datafile[,157:160])
+
+# Function to create new dataframe
+
+insertRow <- function(existingDF, new_row, r) {
+  existingDF[seq(r+1,nrow(existingDF)+1),] <- existingDF[seq(r,nrow(existingDF)),] 
+  existingDF[r,] <- new_row                         
+  return(existingDF)
+  }
+```
+# Rewrite Likert scale as numbers (characters -> numeric)
+```{r}
+# Create a list of tables
+tables <- list(General_0, Steel_0)
+
+# Define the recoding rules
+likert_scale <- c(
+  "1: strongly disagree" = 1,
+  "2: disagree" = 2,
+  "3: neither agree nor disagree" = 3,
+  "4: agree" = 4,
+  "5: strongly agree" = 5
+)
+
+# Function to replace Likert scale values with numeric values in a table
+replace_values <- function(table) {
+  for (col in names(table)) {
+    if (nrow(table) > 0 && !is.null(table[[col]])) {
+      table[[col]] <- as.character(table[[col]])  # Convert to character
+      table[[col]] <- ifelse(table[[col]] %in% names(likert_scale), likert_scale[table[[col]]], table[[col]])  # Replace values using recoding rules
+    }
+  }
+  return(table)
+}
+
+# Apply the function to each table in the list and store modified tables separately
+modified_tables <- lapply(tables, replace_values)
+
+# Remove tables with zero rows
+modified_tables <- modified_tables[sapply(modified_tables, function(x) !is.null(x) && nrow(x) > 0)]
+
+# Print the modified tables
+for (i in seq_along(modified_tables)) {
+  cat("Modified Table", i, ":\n")
+  #print(modified_tables[[i]])
+  cat("\n")
+}
+
+General  <- replace_values(tables[[1]])
+Steel <- replace_values(tables[[2]])
+```
+# Cleaning Code: remove rows less than 80% complete and count rows
+```{r}
+# Check that 80% of questions answered per case:
+
+is_row_empty <- function(row) {
+  all(is.na(row) | row == "")
+}
+calculate_completeness <- function(row) {
+  total_values <- sum(!is.na(row) & row != "")
+  total_columns <- length(row)
+  completeness <- total_values / total_columns * 100
+  return(completeness)
+}
+
+## Demographic
+print("Demographic:")
+rows_to_delete <- c()  # Store row indices to delete
+
+for (i in 1:nrow(Demographic)) {
+  current_row <- Demographic[i, ]
+  
+  if (is_row_empty(current_row)) {
+    print(paste("Row", i, "is empty"))
+    rows_to_delete <- c(rows_to_delete, i)
+  } else {
+    completeness_percentage <- calculate_completeness(current_row)
+    if (completeness_percentage < 80) {
+      print(paste("Row", i, "is", completeness_percentage, "% complete"))
+      rows_to_delete <- c(rows_to_delete, i)
+    } else {
+      print(paste("Row", i, "is", completeness_percentage, "% complete (OK)"))
+    }
+  }
+}
+
+# Delete rows with completeness < 80%
+Demographic <- Demographic[!(1:nrow(Demographic) %in% rows_to_delete), ]
+
+## General
+print("General:")
+rows_to_delete <- c()  # Store row indices to delete
+
+for (i in 1:nrow(General)) {
+  current_row <- General[i, ]
+  
+  if (is_row_empty(current_row)) {
+    print(paste("Row", i, "is empty"))
+    rows_to_delete <- c(rows_to_delete, i)
+  } else {
+    completeness_percentage <- calculate_completeness(current_row)
+    if (completeness_percentage < 80) {
+      print(paste("Row", i, "is", completeness_percentage, "% complete"))
+      rows_to_delete <- c(rows_to_delete, i)
+    } else {
+      print(paste("Row", i, "is", completeness_percentage, "% complete (OK)"))
+    }
+  }
+}
+
+# Delete rows with completeness < 80%
+General <- General[!(1:nrow(General) %in% rows_to_delete), ]
+
+
+## Steel
+print("Steel:")
+rows_to_delete <- c() 
+for (i in 1:nrow(Steel)) {
+  current_row <- Steel[i, ]
+  
+  if (is_row_empty(current_row)) {
+    print(paste("Row", i, "is empty"))
+    rows_to_delete <- c(rows_to_delete, i)
+  } else {
+    completeness_percentage <- calculate_completeness(current_row)
+    if (completeness_percentage < 80) {
+      print(paste("Row", i, "is", completeness_percentage, "% complete"))
+      rows_to_delete <- c(rows_to_delete, i)
+    } else {
+      print(paste("Row", i, "is", completeness_percentage, "% complete (OK)"))
+    }
+  }
+}
+Steel <- Steel[!(1:nrow(Steel) %in% rows_to_delete), ]
+
+# Count number of remaining cases:
+num_rows_Demographic <- nrow(Demographic)
+num_rows_General <- nrow(General)
+num_rows_Steel <- nrow(Steel)
+```
+# Sample characteristics
+```{r}
+new_names <- c("Profession", "Experience", "Region")
+colnames(Demographic) <- new_names
+Demographic <- Demographic[!(1:nrow(Demographic) %in% rows_to_delete), ] # Delete row 8 which is less than 80% complete
+
+#Profession
+
+frequency_Profession <- table(Demographic$Profession)
+frequency_Profession <- data.frame(frequency_Profession)
+percentage_Profession <- round(prop.table(table(Demographic$Profession)) * 100,2)
+percentage_Profession <- data.frame(percentage_Profession)
+
+Profession <- cbind(frequency_Profession, percentage_Profession[,2])
+colnames(Profession) <- c("Profession","Frequency","Percentage")
+
+#Experience in company
+frequency_Experience <- table(Demographic$Experience)
+frequency_Experience <- data.frame(frequency_Experience)
+percentage_Experience <- round(prop.table(table(Demographic$Experience)) * 100,2)
+percentage_Experience <- data.frame(percentage_Experience)
+
+Experience <- cbind(frequency_Experience, percentage_Experience[,2])
+colnames(Experience) <- c("Experience","Frequency","Percentage")
+
+#Region
+frequency_Region <- table(Demographic$Region)
+frequency_Region <- data.frame(frequency_Region)
+percentage_Region <- round(prop.table(table(Demographic$Region)) * 100,2)
+percentage_Region <- data.frame(percentage_Region)
+
+Region <- cbind(frequency_Region, percentage_Region[,2])
+colnames(Region) <- c("Region","Frequency","Percentage")
+```
+#  GENERAL: Calculate average of all qestions for one condition:ignore NA
+```{r}
+
+General <- General[!(1:nrow(General) %in% rows_to_delete), ] # Delete row 8 which is less than 80% complete
+General[General == ""] <- 3
+
+General <- General[-c(8, 11, 12), ]
+General <- as.data.frame(sapply(General, as.numeric))
+
+General_load_capacity <- data.frame(rowMeans(General[,1:16], na.rm = TRUE))
+names(General_load_capacity) <- "General_load_capacity"
+
+General_quantity <- data.frame(rowMeans(General[,17:21], na.rm = TRUE))
+names(General_quantity) <- "General_quantity"
+
+General_logistics <- data.frame(rowMeans(General[,22:32], na.rm = TRUE))
+names(General_logistics) <- "General_logistics"
+
+General_flexibility<- data.frame(rowMeans(General[,33:44], na.rm = TRUE))
+names(General_flexibility) <- "General_flexibility"
+
+General_Conditions <- cbind(General_load_capacity, setNames(General_flexibility, names(General_flexibility)))
+```
+#  STEEL: Calculate average of all qestions for one condition:ignore NA
+```{r}
+Steel <- Steel[-c(8, 11, 12), ]
+Steel[Steel == ""] <- 3
+
+Steel <- as.data.frame(sapply(Steel, as.numeric))
+
+Steel_condition <- data.frame(rowMeans(Steel[, 1:10], na.rm = TRUE))
+names(Steel_condition) <- "Steel_condition"
+Steel_quantity <- data.frame(rowMeans(Steel[, 11:19], na.rm = TRUE))
+names(Steel_quantity) <- "Steel_quantity"
+Steel_logistics <- data.frame(rowMeans(Steel[, 20:22], na.rm = TRUE))
+names(Steel_logistics) <- "Steel_logistics"
+Steel_documentation <- data.frame(rowMeans(Steel[, 23:26], na.rm = TRUE))
+names(Steel_documentation) <- "Steel_documentation"
+Steel_outcome <- data.frame(rowMeans(Steel[, 27:30], na.rm = TRUE))
+names(Steel_outcome) <- "Steel_outcome"
+
+Quantity_s <- cbind(General_quantity, Steel_quantity)
+Quantity_s <- data.frame(rowMeans(Quantity_s[,], na.rm = TRUE))
+names(Quantity_s) <- "Quantity_s"
+
+Logistics_s <- cbind(General_logistics, Steel_logistics)
+Logistics_s <- data.frame(rowMeans(Logistics_s[,], na.rm = TRUE))
+names(Logistics_s) <- "Logistics_s"
+
+Steel_Conditions <- cbind(General_Conditions, Steel_condition, setNames(Quantity_s, names(Quantity_s)), setNames(Logistics_s, names(Logistics_s)),setNames(Steel_documentation, names(Steel_documentation)), setNames(Steel_outcome, names(Steel_outcome)))
+```
+# GENERAL: Calibrate to fuzzy set: absolute approach
+```{r}
+thresh_steel = "e=2.3, c =3.1, i=3.6" # ok pars solutions -> despite bad logistics choose to reuse
+
+General_Conditions <- as.data.frame(sapply(General_Conditions, as.numeric))
+# Check the resulting numeric table
+quintiles <- lapply(General_Conditions, function(col) {
+  if (is.numeric(col)) {
+    quantile(col, probs = c(0.15, 0.5, 0.85), na.rm = TRUE)
+  } else {
+    NA
+  }
+})
+
+# Print the quintiles
+for (i in seq_along(quintiles)) {
+  col_name <- names(quintiles)[i]
+  cat("Column:", col_name, "\n")
+  if (is.numeric(quintiles[[i]])) {
+    cat("15% Quintile:", quintiles[[i]][1], "\n")
+    cat("50% Quintile:", quintiles[[i]][2], "\n")
+    cat("85% Quintile:", quintiles[[i]][3], "\n\n")
+   } else {
+    cat("Not a numeric column\n\n")
+  }
+}
+  
+General_load_capacity_c <- data.frame(calibrate(General_Conditions$General_load_capacity, type = "fuzzy", method = "direct", thresholds = thresh_steel))
+names(General_load_capacity_c) <- "General_load_capacity_c"
+
+#General_quantity_c <- data.frame(calibrate(General_Conditions$General_quantity, type = "fuzzy", method = "direct",thresholds = thresh_steel))
+#names(General_quantity_c) <- "General_quantity_c"
+
+#General_logistics_c <- data.frame(calibrate(General_Conditions$General_logistics, type = "fuzzy", method = "direct",thresholds = thresh_steel))
+#names(General_logistics_c) <- "General_logistics_c"
+
+General_flexibility_c <- data.frame(calibrate(General_Conditions$General_flexibility, type = "fuzzy", method = "direct",thresholds = thresh_steel))
+names(General_flexibility_c) <- "General_flexibility_c"
+
+General_Conditions_c <- cbind(General_load_capacity_c, setNames(General_flexibility_c, names(General_flexibility_c)))
+```
+# STEEL: Calibrate to fuzzy set: absolute approach
+```{r}
+Steel_Conditions <- as.data.frame(sapply(Steel_Conditions, as.numeric))
+# Check the resulting numeric table
+quintiles <- lapply(Steel_Conditions, function(col) {
+  if (is.numeric(col)) {
+    quantile(col, probs = c(0.15, 0.5, 0.85), na.rm = TRUE)
+  } else {
+    NA
+  }
+})
+
+# Print the quintiles
+for (i in seq_along(quintiles)) {
+  col_name <- names(quintiles)[i]
+  cat("Column:", col_name, "\n")
+  if (is.numeric(quintiles[[i]])) {
+    cat("15% Quintile:", quintiles[[i]][1], "\n")
+    cat("50% Quintile:", quintiles[[i]][2], "\n")
+    cat("85% Quintile:", quintiles[[i]][3], "\n\n")
+  } else {
+    cat("Not a numeric column\n\n")
+  }
+}
+
+Quantity_s_c <- data.frame(calibrate(Steel_Conditions$Quantity_s, type = "fuzzy", method = "direct",thresholds = thresh_steel))
+names(Quantity_s_c) <- "Quantity_s_c"
+
+Logistics_s_c <- data.frame(calibrate(Steel_Conditions$Logistics_s, type = "fuzzy", method = "direct",thresholds = thresh_steel))
+names(Logistics_s_c) <- "Logistics_s_c"
+
+Steel_condition_c <- data.frame(calibrate(Steel_Conditions$Steel_condition, type = "fuzzy", method = "direct",thresholds = thresh_steel))
+names(Steel_condition_c) <- "Steel_condition_c"
+
+#Steel_quantity_c <- data.frame(calibrate(Steel_Conditions$Steel_quantity, type = "fuzzy", method = "direct",thresholds = thresh_steel))
+#names(Steel_quantity_c) <- "Steel_quantity_c"
+
+#Steel_logistics_c <- data.frame(calibrate(Steel_Conditions$Steel_logistics, type = "fuzzy", method = "direct",thresholds = thresh_steel))
+#names(Steel_logistics_c) <- "Steel_logistics_c"
+
+Steel_documentation_c <- data.frame(calibrate(Steel_Conditions$Steel_documentation, type = "fuzzy", method = "direct",thresholds = thresh_steel))
+names(Steel_documentation_c) <- "Steel_documentation_c"
+
+Steel_outcome_c <- data.frame(calibrate(Steel_Conditions$Steel_outcome, type = "fuzzy", method = "direct",thresholds = thresh_steel))
+names(Steel_outcome_c) <- "Steel_outcome_c"
+
+Steel_Conditions_c <- cbind(General_Conditions_c, Steel_condition_c, setNames(Quantity_s_c, names(Quantity_s_c)), setNames(Logistics_s_c,names(Logistics_s_c)), setNames(Steel_documentation_c,names(Steel_documentation_c)), setNames(Steel_outcome_c,names(Steel_outcome_c)))
+```
+# Add 0.001 to all 0.5:
+```{r}
+Steel_Conditions_c[Steel_Conditions_c == 0.5] <- Steel_Conditions_c[Steel_Conditions_c == 0.5] + 0.001
+```
+
+# Necessity Analysis: 
+```{r}
+conds_steel <- subset(Steel_Conditions_c, select = c("General_load_capacity_c","General_flexibility_c","Steel_condition_c", "Quantity_s_c","Logistics_s_c","Steel_documentation_c"))
+pof(conds_steel, "Steel_outcome_c", Steel_Conditions_c, relation = "nec")
+```
+# Sufficiency Analysis: 
+```{r}
+pof(conds_steel, "Steel_outcome_c", Steel_Conditions_c, relation = "suf")
+```
+
+# Truth Tables:
+```{r}
+ttSTEEL <- truthTable(data=Steel_Conditions_c, outcome = "Steel_outcome_c", conditions =  c("General_load_capacity_c","General_flexibility_c","Steel_condition_c", "Quantity_s_c","Logistics_s_c","Steel_documentation_c"), incl.cut = 0.79, n.cut = 1, sort.by="incl, n", complete=FALSE, show.cases=TRUE, pri.cut = 0.65) 
+print(ttSTEEL)
+```
+# Robustness Test
+```{r}
+ttSTEEL_rob <- truthTable(data=Steel_Conditions_c, outcome = "Steel_outcome_c", conditions =  c("General_load_capacity_c","General_flexibility_c","Steel_condition_c", "Quantity_s_c","Logistics_s_c","Steel_documentation_c"), incl.cut = 0.75, n.cut = 1, sort.by="incl, n", complete=FALSE, show.cases=TRUE, pri.cut = 0.65) 
+print(ttSTEEL_rob)
+# Conservative solution
+csSTEEL <- minimize(ttSTEEL_rob, details=TRUE, show.cases=TRUE)
+print(csSTEEL)
+# Parsimonious solution:
+psSTEEL <- minimize(ttSTEEL_rob, include="?", details=TRUE, show.cases=TRUE)
+print(psSTEEL)
+```
+
+# Minimze Truth table:
+```{r}
+# Conservative solution
+csSTEEL <- minimize(ttSTEEL, details=TRUE, show.cases=TRUE)
+print(csSTEEL)
+# Parsimonious solution:
+psSTEEL <- minimize(ttSTEEL, include="?", details=TRUE, show.cases=TRUE)
+print(psSTEEL)
+```
+# Analysis Flexibility
+```{r}
+Flex_thresh = "e=2.0, c =3.1, i=4.6"
+General_flexibility_span <- data.frame(rowMeans(General[,33:38], na.rm = TRUE))
+names(General_flexibility_span) <- "General_flexibility_span"
+
+General_flexibility_costs <- data.frame(rowMeans(General[,39:44], na.rm = TRUE))
+names(General_flexibility_costs) <- "General_flexibility_costs"
+
+Flexibiliy_total <- cbind(General_flexibility_span,General_flexibility_costs)
+
+# Calibrate
+General_flexibility_span_c <- data.frame(calibrate(Flexibiliy_total$General_flexibility_span, type = "fuzzy", method = "direct",thresholds = Flex_thresh))
+names(General_flexibility_span_c) <- "General_flexibility_span_c"
+
+General_flexibility_costs_c <- data.frame(calibrate(Flexibiliy_total$General_flexibility_costs, type = "fuzzy", method = "direct",thresholds = Flex_thresh))
+names(General_flexibility_costs_c) <- "General_flexibility_costs_c"
+
+Steel_outcome_c <- data.frame(calibrate(Steel_Conditions$Steel_outcome, type = "fuzzy", method = "direct",thresholds = Flex_thresh))
+names(Steel_outcome_c) <- "Steel_outcome_c"
+
+Flexibiliy_total_c <- cbind(General_flexibility_span_c,General_flexibility_costs_c, Steel_outcome_c)
+
+Flexibiliy_total_c[Flexibiliy_total_c == 0.5] <- Flexibiliy_total_c[Flexibiliy_total_c == 0.5] + 0.001
+
+# Truth Table
+conds_flex <- subset(Flexibiliy_total_c, select = c("General_flexibility_costs_c","General_flexibility_span_c"))
+pof(conds_flex, "Steel_outcome_c", Flexibiliy_total_c, relation = "nec")
+
+
+ttFlex_s <- truthTable(data=Flexibiliy_total_c, outcome = "Steel_outcome_c", conditions =  c("General_flexibility_costs_c","General_flexibility_span_c"), incl.cut = 0.79, n.cut = 1, sort.by="incl, n", complete=FALSE, show.cases=TRUE) 
+print(ttFlex_s)
+
+# Conservative solution
+csFLEX <- minimize(ttFlex_s, details=TRUE, show.cases=TRUE)
+print(csFLEX)
+# Parsimonious solution:
+psFLEX <- minimize(ttFlex_s, include="?", details=TRUE, show.cases=TRUE)
+print(psFLEX)
+
+# Plot
+General_flexibility_costs_1 <- data.frame(General[1,39:44])
+General_flexibility_costs_1 <- data.frame(t(General_flexibility_costs_1))
+General_flexibility_costs_8 <- data.frame(General[8,39:44])
+General_flexibility_costs_8 <- data.frame(t(General_flexibility_costs_8))
+General_flexibility_costs_5 <- data.frame(General[5,39:44])
+General_flexibility_costs_5 <- data.frame(t(General_flexibility_costs_5))
+General_flexibility_costs <- cbind(General_flexibility_costs_1, General_flexibility_costs_8, General_flexibility_costs_5)
+General_flexibility_costs <- data.frame(rowMeans(General_flexibility_costs))
+names(General_flexibility_costs) <- "General_flexibility_costs"
+General_flexibility_costs_c <- data.frame(calibrate(General_flexibility_costs$General_flexibility_costs, type = "fuzzy", method = "direct",thresholds = Flex_thresh))
+names(General_flexibility_costs_c) <- "General_flexibility_costs_c"
+rownames(General_flexibility_costs_c) <- c("5%", "10%", "15%", "20%", "25%", "30%")
+## General_flexibility_costs_c
+points <- General_flexibility_costs_c$General_flexibility_costs_c
+row_names <- rownames(General_flexibility_costs_c) 
+plot(1:length(points), points, pch = 16, col = "blue", ylim = c(0, max(points)), ylab = "Value", xlab = "", xaxt = "n")
+axis(1, at = 1:length(points), labels = row_names)
+title(main = "General_flexibility_costs_c case 1,5,8")
+grid()
+```
+# Analysis Documentation
+```{r}
+# One needs the following information to decide whether a steel element is worth testing:
+
+Documentation_1 <- data.frame(Steel[1, 23:26])
+Documentation_1 <- data.frame(t(Documentation_1))
+Documentation_5 <- data.frame(Steel[5, 23:26])
+Documentation_5 <- data.frame(t(Documentation_5))
+Documentation_8 <- data.frame(Steel[8, 23:26])
+Documentation_8 <- data.frame(t(Documentation_8))
+Documentation_cases <- cbind(Documentation_1, Documentation_5, Documentation_8)
+Documentation_cases <- data.frame(rowMeans(Documentation_cases))
+names(Documentation_cases) <- "Documentation_cases"
+doc_thresh = "e=2, c = 3, i=4"
+Documentation_cases_c <- data.frame(calibrate(Documentation_cases$Documentation_cases, type = "fuzzy", method = "direct",thresholds = doc_thresh))
+names(Documentation_cases_c) <- "Documentation_cases_c"
+rownames(Documentation_cases_c) <- c("Dimensions", "Dimensions + Yiel strength", "Dimensions + Yiel strength \n + Tensile strength", "more")
+points <- Documentation_cases_c$Documentation_cases_c
+row_names <- rownames(Documentation_cases_c) 
+plot(1:length(points), points, pch = 16, col = "blue", ylim = c(0, max(points)), ylab = "fuzzy Value", xlab = "", xaxt = "n")
+text(1:length(points), par("usr")[3]-0.1, 
+     srt = 0, adj = 0.25, xpd = TRUE,
+     labels = row_names, cex = 0.8)
+axis(1, at = 1:length(points), labels = FALSE)
+title(main = "Documentation_cases_c case 1,5,9,12")
+grid()
+```
+# Analysis Condition:
+```{r}
+cond_thresh = "e=2.0, c =3.01, i=4.1"
+
+Steel_condition_corrosion <- data.frame(rowMeans(Steel[, 1:4], na.rm = TRUE))
+names(Steel_condition_corrosion) <- "Steel_condition_corrosion"
+
+Steel_condition_age <- data.frame(rowMeans(Steel[, 5:8], na.rm = TRUE))
+names(Steel_condition_age) <- "Steel_condition_age"
+
+Condition_total <- cbind(Steel_condition_corrosion,Steel_condition_age)
+
+# Calibrate
+Steel_condition_corrosion_c <- data.frame(calibrate(Condition_total$Steel_condition_corrosion, type = "fuzzy", method = "direct",thresholds = cond_thresh))
+names(Steel_condition_corrosion_c) <- "Steel_condition_corrosion_c"
+
+Steel_condition_age_c <- data.frame(calibrate(Condition_total$Steel_condition_age, type = "fuzzy", method = "direct",thresholds = cond_thresh))
+names(Steel_condition_age_c) <- "Steel_condition_age_c"
+
+Steel_outcome_c <- data.frame(calibrate(Steel_Conditions$Steel_outcome, type = "fuzzy", method = "direct",thresholds = cond_thresh))
+names(Steel_outcome_c) <- "Steel_outcome_c"
+
+Condition_total_c <- cbind(Steel_condition_corrosion_c,Steel_condition_age_c, Steel_outcome_c)
+
+Condition_total_c[Condition_total_c == 0.5] <- Condition_total_c[Condition_total_c == 0.5] + 0.001
+
+# Truth Table
+conds_cond <- subset(Condition_total_c, select = c("Steel_condition_corrosion_c","Steel_condition_age_c"))
+pof(conds_cond, "Steel_outcome_c", Condition_total_c, relation = "nec")
+
+
+ttCond_s <- truthTable(data=Condition_total_c, outcome = "Steel_outcome_c", conditions = c("Steel_condition_corrosion_c","Steel_condition_age_c"), incl.cut = 0.79, n.cut = 1, sort.by="incl, n", complete=FALSE, show.cases=TRUE) 
+print(ttCond_s)
+
+# Conservative solution
+csCOND <- minimize(ttCond_s, details=TRUE, show.cases=TRUE)
+print(csCOND)
+# Parsimonious solution:
+psCOND <- minimize(ttCond_s, include="?", details=TRUE, show.cases=TRUE)
+print(psCOND)
+
+# A reclaimed steel element is reusable up to the age of:
+
+Steel_condition_corrosion_4 <- data.frame(Steel[4, 1:4])
+Steel_condition_corrosion_4 <- data.frame(t(Steel_condition_corrosion_4))
+names(Steel_condition_corrosion_4) <- "Steel_condition_corrosion_4"
+Steel_condition_corrosion_4_c <- data.frame(calibrate(Steel_condition_corrosion_4$Steel_condition_corrosion_4, type = "fuzzy", method = "direct",thresholds = cond_thresh))
+neg_Steel_condition_corrosion_4_c <- 1- Steel_condition_corrosion_4_c
+names(neg_Steel_condition_corrosion_4_c) <- "neg_Steel_condition_corrosion_4_c"
+rownames(neg_Steel_condition_corrosion_4_c) <- c("1-1,5% ", "1,5-3%", "3-4,5%", "4,5-6%")
+
+points <- neg_Steel_condition_corrosion_4_c$neg_Steel_condition_corrosion_4_c
+row_names <- rownames(neg_Steel_condition_corrosion_4_c) 
+plot(1:length(points), points, pch = 16, col = "blue", ylim = c(0, max(points)), ylab = "Value", xlab = "", xaxt = "n")
+axis(1, at = 1:length(points), labels = row_names)
+title(main = "neg_Steel_condition_corrosion_4_c case 4")
+grid()
+
+Steel_condition_age_4 <- data.frame(Steel[4, 5:10])
+Steel_condition_age_4 <- data.frame(t(Steel_condition_age_4))
+names(Steel_condition_age_4) <- "Steel_condition_age_4"
+Steel_condition_age_4_c <- data.frame(calibrate(Steel_condition_age_4$Steel_condition_age_4, type = "fuzzy", method = "direct",thresholds = cond_thresh))
+names(Steel_condition_age_4_c) <- "Steel_condition_age_4_c"
+rownames(Steel_condition_age_4_c) <- c("1-10 years", "11-20 years", "21-30 years", "31-40 years", "41-50 years","51-60 years")
+
+points <- Steel_condition_age_4_c$Steel_condition_age_4_c
+row_names <- rownames(Steel_condition_age_4_c) 
+plot(1:length(points), points, pch = 16, col = "blue", ylim = c(0, max(points)), ylab = "Value", xlab = "", xaxt = "n")
+axis(1, at = 1:length(points), labels = row_names)
+title(main = "Steel_condition_age_4_c case 4")
+grid()
+```
+# Analysis Logistics
+```{r}
+thresh_log = "e=2.4, c = 3.01, i=4.2"
+Steel_logistics_Dissassembly <- data.frame(rowMeans(Steel[, 20:22], na.rm = TRUE))
+names(Steel_logistics_Dissassembly) <- "Steel_logistics_Dissassembly"
+
+Logistics_storage <- data.frame(rowMeans(General[,22:26], na.rm = TRUE))
+names(Logistics_storage) <- "Logistics_storage"
+
+Logistics_transport <- data.frame(rowMeans(General[,27:32], na.rm = TRUE))
+names(Logistics_transport) <- "Logistics_transport"
+
+Logistic_total_steel <- cbind(Steel_logistics_Dissassembly,Logistics_storage,Logistics_transport)
+
+Steel_logistics_Dissassembly_c <- data.frame(calibrate(Logistic_total_steel$Steel_logistics_Dissassembly, type = "fuzzy", method = "direct",thresholds = thresh_log))
+names(Steel_logistics_Dissassembly_c) <- "Steel_logistics_Dissassembly_c"
+
+Logistics_storage_c <- data.frame(calibrate(Logistic_total_steel$Logistics_storage, type = "fuzzy", method = "direct",thresholds = thresh_log))
+names(Logistics_storage_c) <- "Logistics_storage_c"
+
+Logistics_transport_c <- data.frame(calibrate(Logistic_total_steel$Logistics_transport, type = "fuzzy", method = "direct",thresholds = thresh_log))
+names(Logistics_transport_c) <- "Logistics_transport_c"
+
+Steel_outcome_c <- data.frame(calibrate(Steel_Conditions$Steel_outcome, type = "fuzzy", method = "direct",thresholds = thresh_log))
+names(Steel_outcome_c) <- "Steel_outcome_c"
+
+Logistic_total_steel_c <- cbind(Steel_logistics_Dissassembly_c,Logistics_storage_c,Logistics_transport_c,Steel_outcome_c)
+
+Logistic_total_steel_c[Logistic_total_steel_c == 0.5] <- Logistic_total_steel_c[Logistic_total_steel_c == 0.5] + 0.001
+
+conds_log <- subset(Logistic_total_steel_c, select = c("Steel_logistics_Dissassembly_c","Logistics_storage_c","Logistics_transport_c"))
+
+pof(conds_log, "Steel_outcome_c", Logistic_total_steel_c, relation = "nec")
+
+ttLOG <- truthTable(data=Logistic_total_steel_c, outcome = "Steel_outcome_c", conditions =  c("Steel_logistics_Dissassembly_c","Logistics_storage_c","Logistics_transport_c"), incl.cut = 0.79, n.cut = 1, sort.by="incl, n", complete=FALSE, show.cases=TRUE, pri.cut = 0.5) 
+print(ttLOG)
+# Conservative solution
+csLOG <- minimize(ttLOG, details=TRUE, show.cases=TRUE)
+print(csLOG)
+# Parsimonious solution:
+psLOG <- minimize(ttLOG, include="?", details=TRUE, show.cases=TRUE)
+print(psLOG)
+
+# Reclaimed elements should not be stored longer than:
+
+Logistics_storage_4 <- data.frame(General[4,22:26])
+names(Logistics_storage_4) <- "Logistics_storage_4"
+Logistics_storage_4 <- data.frame(t(Logistics_storage_4))
+names(Logistics_storage_4) <- "Logistics_storage_4"
+
+Logistics_storage_4_c <- data.frame(calibrate(Logistics_storage_4$Logistics_storage_4, type = "fuzzy", method = "direct",thresholds = thresh_log))
+names(Logistics_storage_4_c) <- "Logistics_storage_4_c"
+rownames(Logistics_storage_4_c) <- c("3 months", "6 month", "9 month", "12 month", "more than 1 year")
+## General_flexibility_costs_c
+points <- Logistics_storage_4_c$Logistics_storage_4_c
+row_names <- rownames(Logistics_storage_4_c) 
+plot(1:length(points), points, pch = 16, col = "blue", ylim = c(0, max(points)), ylab = "Value", xlab = "", xaxt = "n")
+axis(1, at = 1:length(points), labels = row_names)
+title(main = "Logistics_storage_4_c case 4")
+grid()
+
+```
+# Generate LaTeX table code
+```{r}
+#Region_latex <- knitr::kable(Region, format = "latex")
+#Experience_latex <- knitr::kable(Experience, format = "latex")
+#Profession_latex <- knitr::kable(Profession, format = "latex")
+# Install and load the xtable package
+#install.packages("xtable")
+#library(xtable)
+
+
+
+```
+# Testing common method bias -> only if enough time
+```{r}
+# Single Factor Harman's Test:
+Harman_steel <- principal(Steel_Conditions_c, nfactors = 1, residuals = TRUE)
+
+# Print the results
+print(Harman_steel) # PCI:0.36
+
+# Correlation matrix
+
+cor_matrix_Steel <- cor(Steel_Conditions_c) # 0.8240671
+
+# Print the correlation matrix
+#print(cor_matrix)
+#max_corr <- max(cor_matrix_Wood) # Wood: 0.621; Steel:0.46892884; Concrete: 0.981933463 -> high correlation between concrete elements (prefabricated, cast-in-place, quantity...)
+#print(max_corr)
+
+
+```
+# Testing Robustness: change threshold (frequency, consistency) or calibration thresholds
+```{r}
+```
+# Analysis Quantity:
+```{r}
+
+Steel_quantity <- data.frame(rowMeans(Steel[, 11:19], na.rm = TRUE))
+names(Steel_quantity) <- "Steel_quantity"
+
+Steel_quantity_careful_disassembly <- data.frame(colMeans(Steel[, 11:15], na.rm = TRUE))
+names(Steel_quantity_careful_disassembly) <- "Steel_quantity_careful_disassembly"
+rownames(Steel_quantity_careful_disassembly) <- c("1-20%","21-40%","41-60%","61-80%","81-100%")
+Steel_quantity_sametype_salvageable <- data.frame(colMeans(Steel[, 16:19], na.rm = TRUE))
+names(Steel_quantity_sametype_salvageable) <- "Steel_quantity_sametype_salvageable"
+rownames(Steel_quantity_sametype_salvageable) <- c("20","40","60","80")
+
+
+points <- Steel_quantity_careful_disassembly$Steel_quantity_careful_disassembly
+row_names <- rownames(Steel_quantity_careful_disassembly) 
+plot(1:length(points), points, pch = 16, col = "blue", ylim = c(0, max(points)), ylab = "fuzzy Value", xlab = "", xaxt = "n")
+text(1:length(points), par("usr")[3]-0.15, 
+     srt = 0, adj = 0.25, xpd = TRUE,
+     labels = row_names, cex = 0.8)
+axis(1, at = 1:length(points), labels = FALSE)
+title(main = "Steel_quantity_careful_disassembly")
+grid()
+
+points <- Steel_quantity_sametype_salvageable$Steel_quantity_sametype_salvageable
+row_names <- rownames(Steel_quantity_sametype_salvageable) 
+plot(1:length(points), points, pch = 16, col = "blue", ylim = c(0, max(points)), ylab = "fuzzy Value", xlab = "", xaxt = "n")
+text(1:length(points), par("usr")[3]-0.15, 
+     srt = 0, adj = 0.25, xpd = TRUE,
+     labels = row_names, cex = 0.8)
+axis(1, at = 1:length(points), labels = FALSE)
+title(main = "Steel_quantity_sametype_salvageable")
+grid()
+```

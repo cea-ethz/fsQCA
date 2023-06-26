@@ -1,0 +1,687 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+# Load packages
+```{r}
+#install.packages("dplyr")
+#install.packages("QCA")
+#install.packages("forcats")
+#install.packages("psych")
+#install.packages("writexl")
+#install.packages(c("knitr", "kableExtra"))
+
+# Load the packages
+library(knitr)
+library(kableExtra)
+library(writexl)
+library(psych)
+library(dplyr)
+library(QCA)
+library(forcats)
+```
+# Initializing fsQCA
+```{r}
+# Open data file  
+datafile <- read.csv("/Users/fionageorginahansen/Desktop/ETH\ Zürich/Master/4.\ Semester/fsQCA/Results/Results.csv")
+#datafile[datafile == ""] <- NA # if there are no answers code as I don't know = neither agree nor disagree -> after removing rows w/ less than 80%
+
+# Splitting the table into three parts: 1 analysis per material  
+Demographic <- datafile[,3:5]
+General_0 <- datafile[,6:49]
+Wood_0 <- cbind(datafile[,50:72], datafile[,153:156])
+
+# Function to create new dataframe
+
+insertRow <- function(existingDF, new_row, r) {
+  existingDF[seq(r+1,nrow(existingDF)+1),] <- existingDF[seq(r,nrow(existingDF)),] 
+  existingDF[r,] <- new_row                         
+  return(existingDF)
+  }
+```
+# Rewrite Likert scale as numbers (characters -> numeric)
+```{r}
+# Create a list of tables
+tables <- list(General_0, Wood_0)
+
+# Define the recoding rules
+likert_scale <- c(
+  "1: strongly disagree" = 1,
+  "2: disagree" = 2,
+  "3: neither agree nor disagree" = 3,
+  "4: agree" = 4,
+  "5: strongly agree" = 5
+)
+
+# Function to replace Likert scale values with numeric values in a table
+replace_values <- function(table) {
+  for (col in names(table)) {
+    if (nrow(table) > 0 && !is.null(table[[col]])) {
+      table[[col]] <- as.character(table[[col]])  # Convert to character
+      table[[col]] <- ifelse(table[[col]] %in% names(likert_scale), likert_scale[table[[col]]], table[[col]])  # Replace values using recoding rules
+    }
+  }
+  return(table)
+}
+
+# Apply the function to each table in the list and store modified tables separately
+modified_tables <- lapply(tables, replace_values)
+
+# Remove tables with zero rows
+modified_tables <- modified_tables[sapply(modified_tables, function(x) !is.null(x) && nrow(x) > 0)]
+
+# Print the modified tables
+for (i in seq_along(modified_tables)) {
+  cat("Modified Table", i, ":\n")
+  #print(modified_tables[[i]])
+  cat("\n")
+}
+
+General  <- replace_values(tables[[1]])
+Wood <- replace_values(tables[[2]])
+```
+# Sample characteristics
+```{r}
+is_row_empty <- function(row) {
+  all(is.na(row) | row == "")
+}
+calculate_completeness <- function(row) {
+  total_values <- sum(!is.na(row) & row != "")
+  total_columns <- length(row)
+  completeness <- total_values / total_columns * 100
+  return(completeness)
+}
+
+rows_to_delete <- c() 
+for (i in 1:nrow(Demographic)) {
+  current_row <- Demographic[i, ]
+  
+  if (is_row_empty(current_row)) {
+    print(paste("Row", i, "is empty"))
+    rows_to_delete <- c(rows_to_delete, i)
+  } else {
+    completeness_percentage <- calculate_completeness(current_row)
+    if (completeness_percentage < 80) {
+      print(paste("Row", i, "is", completeness_percentage, "% complete"))
+      rows_to_delete <- c(rows_to_delete, i)
+    } else {
+      print(paste("Row", i, "is", completeness_percentage, "% complete (OK)"))
+    }
+  }
+}
+
+Demographic <- Demographic[!(1:nrow(Demographic) %in% rows_to_delete), ]
+new_names <- c("Profession", "Experience", "Region")
+colnames(Demographic) <- new_names
+
+#Profession
+
+frequency_Profession <- table(Demographic$Profession)
+frequency_Profession <- data.frame(frequency_Profession)
+percentage_Profession <- round(prop.table(table(Demographic$Profession)) * 100,2)
+percentage_Profession <- data.frame(percentage_Profession)
+
+Profession <- cbind(frequency_Profession, percentage_Profession[,2])
+colnames(Profession) <- c("Profession","Frequency","Percentage")
+
+#Experience in company
+frequency_Experience <- table(Demographic$Experience)
+frequency_Experience <- data.frame(frequency_Experience)
+percentage_Experience <- round(prop.table(table(Demographic$Experience)) * 100,2)
+percentage_Experience <- data.frame(percentage_Experience)
+
+Experience <- cbind(frequency_Experience, percentage_Experience[,2])
+colnames(Experience) <- c("Experience","Frequency","Percentage")
+
+#Region
+frequency_Region <- table(Demographic$Region)
+frequency_Region <- data.frame(frequency_Region)
+percentage_Region <- round(prop.table(table(Demographic$Region)) * 100,2)
+percentage_Region <- data.frame(percentage_Region)
+
+Region <- cbind(frequency_Region, percentage_Region[,2])
+colnames(Region) <- c("Region","Frequency","Percentage")
+```
+# Cleaning Code: remove rows less than 80% complete and count rows
+```{r}
+# Check that 80% of questions answered per case:
+
+## General
+print("General:")
+rows_to_delete <- c()  # Store row indices to delete
+
+for (i in 1:nrow(General)) {
+  current_row <- General[i, ]
+  
+  if (is_row_empty(current_row)) {
+    print(paste("Row", i, "is empty"))
+    rows_to_delete <- c(rows_to_delete, i)
+  } else {
+    completeness_percentage <- calculate_completeness(current_row)
+    if (completeness_percentage < 80) {
+      print(paste("Row", i, "is", completeness_percentage, "% complete"))
+      rows_to_delete <- c(rows_to_delete, i)
+    } else {
+      print(paste("Row", i, "is", completeness_percentage, "% complete (OK)"))
+    }
+  }
+}
+
+# Delete rows with completeness < 80%
+
+General <- General[!(1:nrow(General) %in% rows_to_delete), ]
+
+## Wood
+print("Wood:")
+rows_to_delete <- c() 
+for (i in 1:nrow(Wood)) {
+  current_row <- Wood[i, ]
+  
+  if (is_row_empty(current_row)) {
+    print(paste("Row", i, "is empty"))
+    rows_to_delete <- c(rows_to_delete, i)
+  } else {
+    completeness_percentage <- calculate_completeness(current_row)
+    if (completeness_percentage < 80) {
+      print(paste("Row", i, "is", completeness_percentage, "% complete"))
+      rows_to_delete <- c(rows_to_delete, i)
+    } else {
+      print(paste("Row", i, "is", completeness_percentage, "% complete (OK)"))
+    }
+  }
+}
+
+Wood <- Wood[!(1:nrow(Wood) %in% rows_to_delete), ]
+
+
+
+# Count number of remaining cases:
+num_rows_Demographic <- nrow(Demographic)
+num_rows_General <- nrow(General)
+```
+#  GENERAL: Calculate average of all qestions for one condition:ignore NA
+```{r}
+
+General[General == ""] <- 3 # if there are no answers code as I don't know = neither agree nor disagree ->
+General <- General[!(1:nrow(General) %in% rows_to_delete), ] # Delete row 8 which is less than 80% complete
+
+General <- General[-c(8, 11, 12), ]
+
+General <- as.data.frame(sapply(General, as.numeric))
+
+General_load_capacity <- data.frame(rowMeans(General[,1:16], na.rm = TRUE))
+names(General_load_capacity) <- "General_load_capacity"
+
+General_quantity <- data.frame(rowMeans(General[,17:21], na.rm = TRUE))
+names(General_quantity) <- "General_quantity"
+
+General_logistics <- data.frame(rowMeans(General[,22:32], na.rm = TRUE))
+names(General_logistics) <- "General_logistics"
+
+General_flexibility<- data.frame(rowMeans(General[,33:44], na.rm = TRUE))
+names(General_flexibility) <- "General_flexibility"
+
+General_Conditions <- cbind(General_load_capacity,General_flexibility)
+```
+#  WOOD: Calculate average of all qestions for one condition:ignore NA
+```{r}
+Wood <- Wood[-c(8, 11, 12), ]
+
+Wood[Wood == ""] <- 3 
+Wood <- as.data.frame(sapply(Wood, as.numeric))
+
+Wood_condition <- data.frame(rowMeans(Wood[, 1:5], na.rm = TRUE))
+names(Wood_condition) <- "Wood_condition"
+Wood_quantity <- data.frame(rowMeans(Wood[, 6:15], na.rm = TRUE))
+names(Wood_quantity) <- "Wood_quantity"
+Wood_logistics <- data.frame(rowMeans(Wood[, 16:19], na.rm = TRUE))
+names(Wood_logistics) <- "Wood_logistics"
+Wood_documentation <- data.frame(rowMeans(Wood[, 20:23], na.rm = TRUE))
+names(Wood_documentation) <- "Wood_documentation"
+Wood_outcome <- data.frame(rowMeans(Wood[, 24:27], na.rm = TRUE))
+names(Wood_outcome) <- "Wood_outcome"
+
+Quantity <- cbind(General_quantity, Wood_quantity)
+Quantity <- data.frame(rowMeans(Quantity[,], na.rm = TRUE))
+names(Quantity) <- "Quantity"
+
+Logistics <- cbind(General_logistics, Wood_logistics)
+Logistics <- data.frame(rowMeans(Logistics[,], na.rm = TRUE))
+names(Logistics) <- "Logistics"
+
+Wood_Conditions <- cbind(General_Conditions, Wood_condition,setNames(Quantity, names(Quantity)), setNames(Logistics, names(Logistics)), setNames(Wood_documentation, names(Wood_documentation)),setNames(Wood_outcome, names(Wood_outcome)))
+
+
+#Wood_Conditions <- cbind(Wood_condition,setNames(Wood_quantity, names(Wood_quantity)), setNames(Wood_logistics, names(Wood_logistics)), setNames(Wood_documentation, names(Wood_documentation)),setNames(Wood_outcome, names(Wood_outcome)))
+```
+# GENERAL: Calibrate to fuzzy set: absolute approach
+```{r}
+thresh_wood = "e=2.8, c = 3.2, i=4" 
+General_Conditions <- as.data.frame(sapply(General_Conditions, as.numeric))
+
+# Check the resulting numeric table
+quintiles <- lapply(General_Conditions, function(col) {
+  if (is.numeric(col)) {
+    quantile(col, probs = c(0.15, 0.5, 0.85), na.rm = TRUE)
+  } else {
+    NA
+  }
+})
+
+# Print the quintiles
+for (i in seq_along(quintiles)) {
+  col_name <- names(quintiles)[i]
+  cat("Column:", col_name, "\n")
+  if (is.numeric(quintiles[[i]])) {
+    cat("15% Quintile:", quintiles[[i]][1], "\n")
+    cat("50% Quintile:", quintiles[[i]][2], "\n")
+    cat("85% Quintile:", quintiles[[i]][3], "\n\n")
+   } else {
+    cat("Not a numeric column\n\n")
+  }
+}
+  
+#General_load_capacity_c <- data.frame(calibrate(General_Conditions$General_load_capacity, type = "fuzzy", method = "direct", thresholds = thresh_wood))
+#names(General_load_capacity_c) <- "General_load_capacity_c"
+
+#General_quantity_c <- data.frame(calibrate(General_Conditions$General_quantity, type = "fuzzy", method = "direct",thresholds = thresh_wood))
+#names(General_quantity_c) <- "General_quantity_c"
+
+#General_logistics_c <- data.frame(calibrate(General_Conditions$General_logistics, type = "fuzzy", method = "direct",thresholds = thresh_wood))
+#names(General_logistics_c) <- "General_logistics_c"
+
+#General_flexibility_c <- data.frame(calibrate(General_Conditions$General_flexibility, type = "fuzzy", method = "direct",thresholds = thresh_wood))
+#names(General_flexibility_c) <- "General_flexibility_c"
+
+#General_Conditions_c <- cbind(General_load_capacity_c, setNames(General_quantity_c, names(General_quantity_c)), setNames(General_logistics_c, names(General_logistics_c)), setNames(General_flexibility_c, names(General_flexibility_c)))
+
+#General_Conditions_c <- cbind(General_load_capacity_c, setNames(General_flexibility_c, names(General_flexibility_c)))
+```
+# WOOD: Calibrate to fuzzy set: absolute approach
+```{r}
+Wood_Conditions <- as.data.frame(sapply(Wood_Conditions, as.numeric))
+# Check the resulting numeric table
+quintiles <- lapply(Wood_Conditions, function(col) {
+  if (is.numeric(col)) {
+    quantile(col, probs = c(0.15, 0.5, 0.85), na.rm = TRUE)
+  } else {
+    NA
+  }
+})
+
+# Print the quintiles
+for (i in seq_along(quintiles)) {
+  col_name <- names(quintiles)[i]
+  cat("Column:", col_name, "\n")
+  if (is.numeric(quintiles[[i]])) {
+    cat("15% Quintile:", quintiles[[i]][1], "\n")
+    cat("50% Quintile:", quintiles[[i]][2], "\n")
+    cat("85% Quintile:", quintiles[[i]][3], "\n\n")
+   } else {
+    cat("Not a numeric column\n\n")
+  }
+}
+
+General_load_capacity_c <- data.frame(calibrate(Wood_Conditions$General_load_capacity, type = "fuzzy", method = "direct",thresholds = thresh_wood))
+names(General_load_capacity_c) <- "General_load_capacity_c"
+
+General_flexibility_c <- data.frame(calibrate(Wood_Conditions$General_flexibility, type = "fuzzy", method = "direct",thresholds = thresh_wood))
+names(General_flexibility_c) <- "General_flexibility_c"
+
+Wood_condition_c <- data.frame(calibrate(Wood_Conditions$Wood_condition, type = "fuzzy", method = "direct",thresholds = thresh_wood))
+names(Wood_condition_c) <- "Wood_condition_c"
+
+Quantity_c <- data.frame(calibrate(Wood_Conditions$Quantity, type = "fuzzy", method = "direct",thresholds = thresh_wood))
+names(Quantity_c) <- "Quantity_c"
+
+#Wood_quantity_c <- data.frame(calibrate(Wood_Conditions$Wood_quantity, type = "fuzzy", method = "direct",thresholds = thresh_wood))
+#names(Wood_quantity_c) <- "Wood_quantity_c"
+
+Logistics_c <- data.frame(calibrate(Wood_Conditions$Logistics, type = "fuzzy", method = "direct",thresholds = thresh_wood))
+names(Logistics_c) <- "Logistics_c"
+
+Wood_documentation_c <- data.frame(calibrate(Wood_Conditions$Wood_documentation, type = "fuzzy", method = "direct",thresholds = thresh_wood))
+names(Wood_documentation_c) <- "Wood_documentation_c"
+
+Wood_outcome_c <- data.frame(calibrate(Wood_Conditions$Wood_outcome, type = "fuzzy", method = "direct",thresholds = thresh_wood))
+names(Wood_outcome_c) <- "Wood_outcome_c"
+
+Wood_Conditions_c <- cbind(General_load_capacity_c, General_flexibility_c, Wood_condition_c, setNames(Quantity_c, names(Quantity_c)), setNames(Logistics_c, names(Logistics_c)), setNames(Wood_documentation_c,names(Wood_documentation_c)), Wood_outcome_c)
+```
+# Add 0.001 to all 0.5:
+```{r}
+Wood_Conditions_c[Wood_Conditions_c == 0.5] <- Wood_Conditions_c[Wood_Conditions_c == 0.5] + 0.001
+```
+
+# Necessity Analysis: 
+```{r}
+conds_wood <- subset(Wood_Conditions_c, select = c("General_load_capacity_c","General_flexibility_c","Wood_condition_c", "Quantity_c", "Logistics_c", "Wood_documentation_c"))
+pof(conds_wood, "Wood_outcome_c", Wood_Conditions_c, relation = "nec")
+
+
+```
+# Sufficiency Analysis: 
+```{r}
+pof(conds_wood, "Wood_outcome_c", Wood_Conditions_c, relation = "suf")
+```
+
+# Truth Tables:
+```{r}
+# removed general quantity since similar to wood_quantity
+ttWOOD <- truthTable(data=Wood_Conditions_c, outcome = "Wood_outcome_c", conditions = c("General_load_capacity_c","General_flexibility_c","Wood_condition_c", "Quantity_c", "Logistics_c", "Wood_documentation_c"), incl.cut = 0.79, n.cut = 1, sort.by="incl, n", complete = FALSE, show.cases=TRUE, pri.cut = 0.65)
+print(ttWOOD)
+```
+```{r}
+#plot(Wood_Conditions$Wood_condition,1:13)
+#plot(Wood_Conditions$Wood_quantity,1:13)
+#plot(Wood_Conditions$Wood_logistics,1:13)
+#plot(Wood_Conditions$Wood_documentation,1:13)
+#plot(Wood_Conditions$Wood_quantity,Wood_Conditions_c$Wood_quantity_c)
+#plot(Wood_Conditions$Wood_logistics,Wood_Conditions_c$Wood_logistics_c)
+#plot(Wood_Conditions$Wood_documentation,Wood_Conditions_c$Wood_documentation_c)
+```
+# Robustness Test
+```{r}
+# removed general quantity since similar to wood_quantity
+ttWOOD_rob <- truthTable(data=Wood_Conditions_c, outcome = "Wood_outcome_c", conditions = c("General_load_capacity_c","General_flexibility_c","Wood_condition_c", "Quantity_c", "Logistics_c", "Wood_documentation_c"), incl.cut = 0.75, n.cut = 1, sort.by="incl, n", complete=FALSE, show.cases=TRUE, pri.cut = 0.65) 
+print(ttWOOD_rob)
+# Conservative solution
+csWOOD <- minimize(ttWOOD_rob, details=TRUE, show.cases=TRUE)
+print(csWOOD)
+# Parsimonious solution:
+psWOOD <- minimize(ttWOOD_rob, include="?", details=TRUE, show.cases=TRUE)
+print(psWOOD)
+```
+
+# Minimze Truth table:
+```{r}
+# Conservative solution
+csWOOD <- minimize(ttWOOD, details=TRUE, show.cases=TRUE)
+print(csWOOD)
+# Parsimonious solution:
+psWOOD <- minimize(ttWOOD, include="?", details=TRUE, show.cases=TRUE)
+print(psWOOD)
+```
+
+# Generate LaTeX table code
+```{r}
+Region_latex <- knitr::kable(Region, format = "latex")
+Experience_latex <- knitr::kable(Experience, format = "latex")
+Profession_latex <- knitr::kable(Profession, format = "latex")
+# Install and load the xtable package
+#install.packages("xtable")
+#library(xtable)
+
+
+
+```
+# Testing common method bias -> only if enough time
+```{r}
+# Single Factor Harman's Test:
+Harman_wood <- principal(Wood_Conditions_c, nfactors = 1, residuals = TRUE)
+
+# Print the results
+print(Harman_wood) # PCI:0.33
+
+# Correlation matrix
+
+cor_matrix_Wood <- cor(Wood_Conditions_c) # 0.60842687
+
+# Print the correlation matrix
+#print(cor_matrix)
+#max_corr <- max(cor_matrix_Wood) # Wood: 0.621; Steel:0.46892884; Concrete: 0.981933463 -> high correlation between concrete elements (prefabricated, cast-in-place, quantity...)
+#print(max_corr)
+plot(Wood_Conditions$General_load_capacity,Wood_Conditions_c$General_load_capacity_c)
+plot(Wood_Conditions$General_flexibility,Wood_Conditions_c$General_flexibility_c)
+plot(Wood_Conditions$Wood_condition,Wood_Conditions_c$Wood_condition_c)
+plot(Wood_Conditions$Quantity,Wood_Conditions_c$Quantity_c)
+plot(Wood_Conditions$Logistics,Wood_Conditions_c$Logistics_c)
+plot(Wood_Conditions$Wood_documentation,Wood_Conditions_c$Wood_documentation)
+
+```
+# Analysis Logistics
+```{r}
+
+thresh_log = "e=2.5, c = 3.01, i=4.8"
+Wood_logistics_Dissassembly <- data.frame(rowMeans(Wood[, 16:19], na.rm = TRUE))
+names(Wood_logistics_Dissassembly) <- "Wood_logistics_Dissassembly"
+
+Logistics_storage <- data.frame(rowMeans(General[,22:26], na.rm = TRUE))
+names(Logistics_storage) <- "Logistics_storage"
+
+Logistics_transport <- data.frame(rowMeans(General[,27:32], na.rm = TRUE))
+names(Logistics_transport) <- "Logistics_transport"
+
+Logistic_total <- cbind(Wood_logistics_Dissassembly,Logistics_storage,Logistics_transport)
+
+Wood_logistics_Dissassembly_c <- data.frame(calibrate(Logistic_total$Wood_logistics_Dissassembly, type = "fuzzy", method = "direct",thresholds = thresh_log))
+names(Wood_logistics_Dissassembly_c) <- "Wood_logistics_Dissassembly_c"
+
+Logistics_storage_c <- data.frame(calibrate(Logistic_total$Logistics_storage, type = "fuzzy", method = "direct",thresholds = thresh_log))
+names(Logistics_storage_c) <- "Logistics_storage_c"
+
+Logistics_transport_c <- data.frame(calibrate(Logistic_total$Logistics_transport, type = "fuzzy", method = "direct",thresholds = thresh_log))
+names(Logistics_transport_c) <- "Logistics_transport_c"
+
+Wood_outcome_c <- data.frame(calibrate(Wood_Conditions$Wood_outcome, type = "fuzzy", method = "direct",thresholds = thresh_log))
+names(Wood_outcome_c) <- "Wood_outcome_c"
+
+Logistic_total_c <- cbind(Wood_logistics_Dissassembly_c,Logistics_storage_c,Logistics_transport_c,Wood_outcome_c)
+
+Logistic_total_c[Logistic_total_c == 0.5] <- Logistic_total_c[Logistic_total_c == 0.5] + 0.001
+
+conds_log <- subset(Logistic_total_c, select = c("Wood_logistics_Dissassembly_c","Logistics_storage_c","Logistics_transport_c"))
+
+pof(conds_log, "Wood_outcome_c", Logistic_total_c, relation = "nec")
+
+ttLOG <- truthTable(data=Logistic_total_c, outcome = "Wood_outcome_c", conditions =  c("Wood_logistics_Dissassembly_c","Logistics_storage_c","Logistics_transport_c"), incl.cut = 0.79, pri.cut = 0.65,
+                    n.cut = 1, sort.by="incl, n", complete=FALSE, show.cases=TRUE) 
+print(ttLOG)
+# Conservative solution
+csLOG <- minimize(ttLOG, details=TRUE, show.cases=TRUE)
+print(csLOG)
+# Parsimonious solution:
+psLOG <- minimize(ttLOG, include="?", details=TRUE, show.cases=TRUE)
+print(psLOG)
+
+# case 2; 5 
+
+
+Wood_logistics_Dissassembly_5 <- data.frame(Wood[5, 16:19])
+Wood_logistics_Dissassembly_5 <- data.frame(t(Wood_logistics_Dissassembly_5))
+names(Wood_logistics_Dissassembly_5) <- "Wood_logistics_Dissassembly_5"
+
+Disassembly_cases <- cbind(Wood_logistics_Dissassembly_5)
+Disassembly_cases <- data.frame(rowMeans(Disassembly_cases))
+names(Disassembly_cases) <- "Disassembly_cases"
+Disassembly_cases_c <- data.frame(calibrate(Disassembly_cases$Disassembly_cases, type = "fuzzy", method = "direct",thresholds = thresh_log))
+names(Disassembly_cases_c) <- "Disassembly_cases_c"
+rownames(Disassembly_cases_c) <-  c("Nailed", "Glued", "Screwed", "Combined \n with concrete")
+points <- Disassembly_cases_c$Disassembly_cases_c
+row_names <- rownames(Disassembly_cases_c) 
+plot(1:length(points), points, pch = 16, col = "blue", ylim = c(0, max(points)), ylab = "fuzzy Value", xlab = "", xaxt = "n")
+text(1:length(points), par("usr")[3]-0.15, 
+     srt = 0, adj = 0.25, xpd = TRUE,
+     labels = row_names, cex = 0.8)
+axis(1, at = 1:length(points), labels = FALSE)
+title(main = "Logistics case 5")
+grid()
+
+```
+# Analysis Load
+```{r}
+
+
+#load_case_4 <- data.frame(General[4, 5:8])
+#load_case_4 <- data.frame(t(load_case_4))
+load_case_5 <- data.frame(General[5, 1:4])
+load_case_5 <- data.frame(t(load_case_5))
+
+load_case_5_4 <- cbind(load_case_5)
+load_case_5_4 <- data.frame(rowMeans(load_case_5_4))
+load_case_5_4 <- data.frame(rowMeans(load_case_5_4))
+names(load_case_5_4) <- "load_case_5_4"
+
+load_thresh = "e=2, c = 3, i=4"
+load_case_5_4 <- data.frame(calibrate(load_case_5_4$load_case_5_4, type = "fuzzy", method = "direct",thresholds = load_thresh))
+
+names(load_case_5_4) <- "load_case_5_4"
+rownames(load_case_5_4) <-  c("Same use: 0.6*old_load", "Same use: 0.8*old_load", "Same use: 1.0*old_load", "Same use: 1.2*old_load")
+points <- load_case_5_4$load_case_5_4
+row_names <- rownames(load_case_5_4) 
+plot(1:length(points), points, pch = 16, col = "blue", ylim = c(0, max(points)), ylab = "fuzzy Value", xlab = "", xaxt = "n")
+axis(1, at = 1:length(points), labels = row_names,las = 1, cex.axis = 0.7, srt = 45)
+title(main = "Load case 5")
+grid()
+
+```
+# Analysis Flexibilit.
+```{r}
+Flex_thresh = "e=2.7, c = 3.01, i=4.5"
+General_flexibility_span <- data.frame(rowMeans(General[,33:38], na.rm = TRUE))
+names(General_flexibility_span) <- "General_flexibility_span"
+
+General_flexibility_costs <- data.frame(rowMeans(General[,39:44], na.rm = TRUE))
+names(General_flexibility_costs) <- "General_flexibility_costs"
+
+Flexibiliy_total <- cbind(General_flexibility_span,General_flexibility_costs)
+
+# Calibrate
+General_flexibility_span_c <- data.frame(calibrate(Flexibiliy_total$General_flexibility_span, type = "fuzzy", method = "direct",thresholds = Flex_thresh))
+names(General_flexibility_span_c) <- "General_flexibility_span_c"
+
+General_flexibility_costs_c <- data.frame(calibrate(Flexibiliy_total$General_flexibility_costs, type = "fuzzy", method = "direct",thresholds = Flex_thresh))
+names(General_flexibility_costs_c) <- "General_flexibility_costs_c"
+
+Wood_outcome_c<- data.frame(calibrate(Wood_Conditions$Wood_outcome, type = "fuzzy", method = "direct",thresholds = Flex_thresh))
+names(Wood_outcome_c) <- "Wood_outcome_c"
+
+Flexibiliy_total_c <- cbind(General_flexibility_span_c,General_flexibility_costs_c, Wood_outcome_c)
+
+Flexibiliy_total_c[Flexibiliy_total_c == 0.5] <- Flexibiliy_total_c[Flexibiliy_total_c == 0.5] + 0.001
+
+# Truth Table
+conds_flex <- subset(Flexibiliy_total_c, select = c("General_flexibility_costs_c","General_flexibility_span_c"))
+pof(conds_flex, "Wood_outcome_c", Flexibiliy_total_c, relation = "nec")
+
+
+ttFlex_s <- truthTable(data=Flexibiliy_total_c, outcome = "Wood_outcome_c", conditions =  c("General_flexibility_costs_c","General_flexibility_span_c"), incl.cut = 0.75, n.cut = 1, sort.by="incl, n", complete=FALSE, show.cases=TRUE) 
+print(ttFlex_s)
+
+# Conservative solution
+csFLEX <- minimize(ttFlex_s, details=TRUE, show.cases=TRUE)
+print(csFLEX)
+# Parsimonious solution:
+psFLEX <- minimize(ttFlex_s, include="?", details=TRUE, show.cases=TRUE)
+print(psFLEX)
+
+# An owners is willing to pay the following percentage more to maximize to amount of reused elements:
+General_flexibility_costs_4 <- data.frame(General[4,39:44])
+General_flexibility_costs_4 <- data.frame(t(General_flexibility_costs_4))
+General_flexibility_costs_5 <- data.frame(General[5,39:44])
+General_flexibility_costs_5 <- data.frame(t(General_flexibility_costs_5))
+General_flexibility_costs <- cbind(General_flexibility_costs_4, General_flexibility_costs_5)
+General_flexibility_costs <- data.frame(rowMeans(General_flexibility_costs))
+names(General_flexibility_costs) <- "General_flexibility_costs"
+
+General_flexibility_costs_c <- data.frame(calibrate(General_flexibility_costs$General_flexibility_costs, type = "fuzzy", method = "direct",thresholds = Flex_thresh))
+
+names(General_flexibility_costs_c) <- "General_flexibility_costs_c"
+neg_flex_cost <- 1-General_flexibility_costs_c
+rownames(General_flexibility_costs_c) <- c("5%", "10%", "15%", "20%", "25%", "30%")
+## General_flexibility_costs_c
+points <- General_flexibility_costs_c$General_flexibility_costs_c
+row_names <- rownames(General_flexibility_costs_c) 
+plot(1:length(points), points, pch = 16, col = "blue", ylim = c(0, max(points)), ylab = "Value", xlab = "", xaxt = "n")
+axis(1, at = 1:length(points), labels = row_names)
+title(main = "General_flexibility_costs_c case 1,5,9,12")
+grid()
+
+rownames(neg_flex_cost) <- c("5%", "10%", "15%", "20%", "25%", "30%")
+## General_flexibility_costs_c
+points <- neg_flex_cost$General_flexibility_costs_c
+row_names <- rownames(neg_flex_cost) 
+plot(1:length(points), points, pch = 16, col = "blue", ylim = c(0, max(points)), ylab = "Value", xlab = "", xaxt = "n")
+axis(1, at = 1:length(points), labels = row_names)
+title(main = "neg_flex_cost case 1,5,9,12")
+grid()
+
+# A owner is willing to sacrifice the following percentage of the structural span to maximise reuse:
+General_flexibility_span_4 <- data.frame(General[4,33:38])
+General_flexibility_span_4 <- data.frame(t(General_flexibility_span_4))
+General_flexibility_span_5 <- data.frame(General[5,33:38])
+General_flexibility_span_5 <- data.frame(t(General_flexibility_span_5))
+General_flexibility_span <- cbind(General_flexibility_span_4, General_flexibility_span_5)
+General_flexibility_span <- data.frame(rowMeans(General_flexibility_span))
+names(General_flexibility_span) <- "General_flexibility_span"
+General_flexibility_span_c  <- data.frame(calibrate(General_flexibility_span$General_flexibility_span, type = "fuzzy", method = "direct",thresholds = Flex_thresh))
+names(General_flexibility_span_c) <- "General_flexibility_span_c"
+rownames(General_flexibility_span_c) <- c("5%", "10%", "15%", "20%", "25%", "30%")
+## General_flexibility_costs_c
+points <- General_flexibility_span_c$General_flexibility_span_c
+row_names <- rownames(General_flexibility_span_c) 
+plot(1:length(points), points, pch = 16, col = "blue", ylim = c(0, max(points)), ylab = "fuzzy Value", xlab = "", xaxt = "n")
+axis(1, at = 1:length(points), labels = row_names)
+title(main = "General_flexibility_span_c case 1,5,9,12")
+grid()
+```
+# Analysis Condition
+```{r}
+# One needs the following information to decide whether a steel element is worth testing:
+
+Condition_5 <- data.frame(Wood[5, 1:5])
+Condition_5 <- data.frame(t(Condition_5))
+Condition_cases <- cbind(Condition_5)
+#Condition_cases <- data.frame(rowMeans(Condition_cases))
+names(Condition_cases) <- "Condition_cases"
+doc_thresh = "e=2, c = 3, i=4"
+Condition_cases <- data.frame(calibrate(Condition_cases$Condition_cases, type = "fuzzy", method = "direct",thresholds = load_thresh))
+names(Condition_cases) <- "Condition_cases"
+rownames(Condition_cases) <- c("1-50 years", "51-100 years", "101-150 years", "151-200 years","201-250 years")
+## General_flexibility_costs_c
+points <- Condition_cases$Condition_cases
+row_names <- rownames(Condition_cases) 
+plot(1:length(points), points, pch = 16, col = "blue", ylim = c(0, max(points)), ylab = "fuzzy Value", xlab = "", xaxt = "n")
+text(1:length(points), par("usr")[3]-0.15, 
+     srt = 0, adj = 0.25, xpd = TRUE,
+     labels = row_names, cex = 0.8)
+axis(1, at = 1:length(points), labels = FALSE)
+title(main = "Condition_cases case 4 and 5")
+grid()
+```
+# Testing Robustness: change threshold (frequency, consistency) or calibration thresholds
+```{r}
+plot(Wood_Conditions$Wood_condition,Wood_Conditions_c$Wood_condition_c)
+```
+# Analysis Quantity:
+```{r}
+Wood_quantity_careful_disassembly <- data.frame(colMeans(Wood[, 6:10], na.rm = TRUE))
+names(Wood_quantity_careful_disassembly) <- "Wood_quantity_careful_disassembly"
+rownames(Wood_quantity_careful_disassembly) <- c("1-20%","21-40%","41-60%","61-80%","81-100%")
+Wood_quantity_sametype_salvageable <- data.frame(colMeans(Wood[, 11:15], na.rm = TRUE))
+names(Wood_quantity_sametype_salvageable) <- "Wood_quantity_sametype_salvageable"
+rownames(Wood_quantity_sametype_salvageable) <- c("1-50","51-100","101-200","201-300","301-400")
+
+
+points <- Wood_quantity_careful_disassembly$Wood_quantity_careful_disassembly
+row_names <- rownames(Wood_quantity_careful_disassembly) 
+plot(1:length(points), points, pch = 16, col = "blue", ylim = c(0, max(points)), ylab = "fuzzy Value", xlab = "", xaxt = "n")
+text(1:length(points), par("usr")[3]-0.15, 
+     srt = 0, adj = 0.25, xpd = TRUE,
+     labels = row_names, cex = 0.8)
+axis(1, at = 1:length(points), labels = FALSE)
+title(main = "Wood_quantity_careful_disassembly")
+grid()
+
+points <- Wood_quantity_sametype_salvageable$Wood_quantity_sametype_salvageable
+row_names <- rownames(Wood_quantity_sametype_salvageable) 
+plot(1:length(points), points, pch = 16, col = "blue", ylim = c(0, max(points)), ylab = "fuzzy Value", xlab = "", xaxt = "n")
+text(1:length(points), par("usr")[3]-0.15, 
+     srt = 0, adj = 0.25, xpd = TRUE,
+     labels = row_names, cex = 0.8)
+axis(1, at = 1:length(points), labels = FALSE)
+title(main = "Wood_quantity_sametype_salvageable")
+grid()
+```
+
+

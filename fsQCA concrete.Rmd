@@ -1,0 +1,595 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+# Load packages
+```{r}
+#install.packages("dplyr")
+#install.packages("QCA")
+#install.packages("forcats")
+#install.packages("psych")
+#install.packages("writexl")
+#install.packages(c("knitr", "kableExtra"))
+
+# Load the packages
+library(knitr)
+library(kableExtra)
+library(writexl)
+library(psych)
+library(dplyr)
+library(QCA)
+library(forcats)
+```
+# Initializing fsQCA
+```{r}
+# Open data file  
+datafile <- read.csv("/Users/fionageorginahansen/Desktop/ETH\ Zürich/Master/4.\ Semester/fsQCA/Results/Results.csv")
+#datafile[datafile == ""] <- NA # if there are no answers code as I don't know = neither agree nor disagree
+
+# Splitting the table into three parts: 1 analysis per material  
+Demographic <- datafile[,3:5]
+General_0 <- datafile[,6:49]
+Concrete_0 <- cbind(datafile[,99:151], datafile[,161:164])
+
+# Function to create new dataframe
+
+insertRow <- function(existingDF, new_row, r) {
+  existingDF[seq(r+1,nrow(existingDF)+1),] <- existingDF[seq(r,nrow(existingDF)),] 
+  existingDF[r,] <- new_row                         
+  return(existingDF)
+  }
+```
+# Rewrite Likert scale as numbers (characters -> numeric)
+```{r}
+# Create a list of tables
+tables <- list(General_0, Concrete_0)
+
+# Define the recoding rules
+likert_scale <- c(
+  "1: strongly disagree" = 1,
+  "2: disagree" = 2,
+  "3: neither agree nor disagree" = 3,
+  "4: agree" = 4,
+  "5: strongly agree" = 5
+)
+
+# Function to replace Likert scale values with numeric values in a table
+replace_values <- function(table) {
+  for (col in names(table)) {
+    if (nrow(table) > 0 && !is.null(table[[col]])) {
+      table[[col]] <- as.character(table[[col]])  # Convert to character
+      table[[col]] <- ifelse(table[[col]] %in% names(likert_scale), likert_scale[table[[col]]], table[[col]])  # Replace values using recoding rules
+    }
+  }
+  return(table)
+}
+
+# Apply the function to each table in the list and store modified tables separately
+modified_tables <- lapply(tables, replace_values)
+
+# Remove tables with zero rows
+modified_tables <- modified_tables[sapply(modified_tables, function(x) !is.null(x) && nrow(x) > 0)]
+
+# Print the modified tables
+for (i in seq_along(modified_tables)) {
+  cat("Modified Table", i, ":\n")
+  #print(modified_tables[[i]])
+  cat("\n")
+}
+
+General  <- replace_values(tables[[1]])
+Concrete <- replace_values(tables[[2]])
+```
+# Cleaning Code: remove rows less than 80% complete and count rows
+```{r}
+# Check that 80% of questions answered per case:
+
+is_row_empty <- function(row) {
+  all(is.na(row) | row == "")
+}
+calculate_completeness <- function(row) {
+  total_values <- sum(!is.na(row) & row != "")
+  total_columns <- length(row)
+  completeness <- total_values / total_columns * 100
+  return(completeness)
+}
+
+## Demographic
+print("Demographic:")
+rows_to_delete <- c()  # Store row indices to delete
+
+for (i in 1:nrow(Demographic)) {
+  current_row <- Demographic[i, ]
+  
+  if (is_row_empty(current_row)) {
+    print(paste("Row", i, "is empty"))
+    rows_to_delete <- c(rows_to_delete, i)
+  } else {
+    completeness_percentage <- calculate_completeness(current_row)
+    if (completeness_percentage < 80) {
+      print(paste("Row", i, "is", completeness_percentage, "% complete"))
+      rows_to_delete <- c(rows_to_delete, i)
+    } else {
+      print(paste("Row", i, "is", completeness_percentage, "% complete (OK)"))
+    }
+  }
+}
+
+# Delete rows with completeness < 80%
+Demographic <- Demographic[!(1:nrow(Demographic) %in% rows_to_delete), ]
+
+## General
+print("General:")
+rows_to_delete <- c()  # Store row indices to delete
+
+for (i in 1:nrow(General)) {
+  current_row <- General[i, ]
+  
+  if (is_row_empty(current_row)) {
+    print(paste("Row", i, "is empty"))
+    rows_to_delete <- c(rows_to_delete, i)
+  } else {
+    completeness_percentage <- calculate_completeness(current_row)
+    if (completeness_percentage < 80) {
+      print(paste("Row", i, "is", completeness_percentage, "% complete"))
+      rows_to_delete <- c(rows_to_delete, i)
+    } else {
+      print(paste("Row", i, "is", completeness_percentage, "% complete (OK)"))
+    }
+  }
+}
+
+# Delete rows with completeness < 80%
+General <- General[!(1:nrow(General) %in% rows_to_delete), ]
+
+## Concrete
+print("Concrete:")
+rows_to_delete <- c() 
+for (i in 1:nrow(Concrete)) {
+  current_row <- Concrete[i, ]
+  
+  if (is_row_empty(current_row)) {
+    print(paste("Row", i, "is empty"))
+    rows_to_delete <- c(rows_to_delete, i)
+  } else {
+    completeness_percentage <- calculate_completeness(current_row)
+    if (completeness_percentage < 80) {
+      print(paste("Row", i, "is", completeness_percentage, "% complete"))
+      rows_to_delete <- c(rows_to_delete, i)
+    } else {
+      print(paste("Row", i, "is", completeness_percentage, "% complete (OK)"))
+    }
+  }
+}
+Concrete <- Concrete[!(1:nrow(Concrete) %in% rows_to_delete), ]
+
+# Count number of remaining cases:
+num_rows_Demographic <- nrow(Demographic)
+num_rows_General <- nrow(General)
+num_rows_Concrete <- nrow(Concrete)
+```
+# Sample characteristics
+```{r}
+new_names <- c("Profession", "Experience", "Region")
+colnames(Demographic) <- new_names
+Demographic <- Demographic[!(1:nrow(Demographic) %in% rows_to_delete), ] # Delete row 8 which is less than 80% complete
+
+#Profession
+
+frequency_Profession <- table(Demographic$Profession)
+frequency_Profession <- data.frame(frequency_Profession)
+percentage_Profession <- round(prop.table(table(Demographic$Profession)) * 100,2)
+percentage_Profession <- data.frame(percentage_Profession)
+
+Profession <- cbind(frequency_Profession, percentage_Profession[,2])
+colnames(Profession) <- c("Profession","Frequency","Percentage")
+
+#Experience in company
+frequency_Experience <- table(Demographic$Experience)
+frequency_Experience <- data.frame(frequency_Experience)
+percentage_Experience <- round(prop.table(table(Demographic$Experience)) * 100,2)
+percentage_Experience <- data.frame(percentage_Experience)
+
+Experience <- cbind(frequency_Experience, percentage_Experience[,2])
+colnames(Experience) <- c("Experience","Frequency","Percentage")
+
+#Region
+frequency_Region <- table(Demographic$Region)
+frequency_Region <- data.frame(frequency_Region)
+percentage_Region <- round(prop.table(table(Demographic$Region)) * 100,2)
+percentage_Region <- data.frame(percentage_Region)
+
+Region <- cbind(frequency_Region, percentage_Region[,2])
+colnames(Region) <- c("Region","Frequency","Percentage")
+```
+#  GENERAL: Calculate average of all qestions for one condition:ignore NA
+```{r}
+General <- General[!(1:nrow(General) %in% rows_to_delete), ] # Delete row 8 which is less than 80% complete
+General[General == ""] <- 3 
+General <- General[-c(8, 11, 12), ]
+General <- as.data.frame(sapply(General, as.numeric))
+
+General_load_capacity <- data.frame(rowMeans(General[,1:16], na.rm = TRUE))
+names(General_load_capacity) <- "General_load_capacity"
+
+General_quantity <- data.frame(rowMeans(General[,17:21], na.rm = TRUE))
+names(General_quantity) <- "General_quantity"
+
+General_logistics <- data.frame(rowMeans(General[,22:32], na.rm = TRUE))
+names(General_logistics) <- "General_logistics"
+
+General_flexibility<- data.frame(rowMeans(General[,33:44], na.rm = TRUE))
+names(General_flexibility) <- "General_flexibility"
+
+General_Conditions <- cbind(General_load_capacity, setNames(General_flexibility, names(General_flexibility)))
+```
+#  Concrete: Calculate average of all qestions for one condition: ignore NA
+```{r}
+Concrete <- Concrete[-c(8, 11, 12), ]
+Concrete[Concrete == ""] <- 3 
+Concrete <- as.data.frame(sapply(Concrete, as.numeric))
+
+Concrete_condition <- data.frame(rowMeans(Concrete[, 1:16], na.rm = TRUE))
+names(Concrete_condition) <- "Concrete_condition"
+Concrete_quantity <- data.frame(rowMeans(Concrete[, 17:44], na.rm = TRUE))
+names(Concrete_quantity) <- "Concrete_quantity"
+Concrete_logistics <- data.frame(rowMeans(Concrete[, 45:49], na.rm = TRUE))
+names(Concrete_logistics) <- "Concrete_logistics"
+Concrete_documentation <- data.frame(rowMeans(Concrete[, 50:53], na.rm = TRUE))
+names(Concrete_documentation) <- "Concrete_documentation"
+Concrete_outcome <- data.frame(rowMeans(Concrete[, 54:57], na.rm = TRUE))
+names(Concrete_outcome) <- "Concrete_outcome"
+
+Quantity_con <- cbind(General_quantity, Concrete_quantity)
+Quantity_con <- data.frame(rowMeans(Quantity_con[,], na.rm = TRUE))
+names(Quantity_con) <- "Quantity_con"
+
+Logistics_con <- cbind(General_logistics, Concrete_logistics)
+Logistics_con <- data.frame(rowMeans(Logistics_con[,], na.rm = TRUE))
+names(Logistics_con) <- "Logistics_con"
+
+Concrete_Conditions <- cbind(Concrete_condition, setNames(Quantity_con, names(Quantity_con)), setNames(Logistics_con, names(Logistics_con)), setNames(Concrete_documentation, names(Concrete_documentation)), setNames(Concrete_outcome, names(Concrete_outcome)))
+```
+# GENERAL: Calibrate to fuzzy set: absolute approach
+```{r}
+thresh_concrete = "e=2.75, c = 3.01, i=3.25"
+General_Conditions <- as.data.frame(sapply(General_Conditions, as.numeric))
+# Check the resulting numeric table
+quintiles <- lapply(General_Conditions, function(col) {
+  if (is.numeric(col)) {
+    quantile(col, probs = c(0.15, 0.5, 0.85), na.rm = TRUE)
+  } else {
+    NA
+  }
+})
+
+# Print the quintiles
+for (i in seq_along(quintiles)) {
+  col_name <- names(quintiles)[i]
+  cat("Column:", col_name, "\n")
+  if (is.numeric(quintiles[[i]])) {
+    cat("15% Quintile:", quintiles[[i]][1], "\n")
+    cat("50% Quintile:", quintiles[[i]][2], "\n")
+    cat("85% Quintile:", quintiles[[i]][3], "\n\n")
+   } else {
+    cat("Not a numeric column\n\n")
+  }
+}
+  
+General_load_capacity_c <- data.frame(calibrate(General_Conditions$General_load_capacity, type = "fuzzy", method = "direct", thresholds = thresh_concrete))
+names(General_load_capacity_c) <- "General_load_capacity_c"
+
+#General_quantity_c <- data.frame(calibrate(General_Conditions$General_quantity, type = "fuzzy", method = "direct",thresholds = thresh_concrete))
+#names(General_quantity_c) <- "General_quantity_c"
+
+#General_logistics_c <- data.frame(calibrate(General_Conditions$General_logistics, type = "fuzzy", method = "direct",thresholds = thresh_concrete))
+#names(General_logistics_c) <- "General_logistics_c"
+
+General_flexibility_c <- data.frame(calibrate(General_Conditions$General_flexibility, type = "fuzzy", method = "direct",thresholds = thresh_concrete))
+names(General_flexibility_c) <- "General_flexibility_c"
+
+General_Conditions_c <- cbind(General_load_capacity_c, setNames(General_flexibility_c, names(General_flexibility_c)))
+```
+# CONCRETE: Calibrate to fuzzy set: absolute approach
+```{r}
+Concrete_Conditions <- as.data.frame(sapply(Concrete_Conditions, as.numeric))
+# Check the resulting numeric table
+quintiles <- lapply(Concrete_Conditions, function(col) {
+  if (is.numeric(col)) {
+    quantile(col, probs = c(0.15, 0.5, 0.85), na.rm = TRUE)
+  } else {
+    NA
+  }
+})
+
+# Print the quintiles
+for (i in seq_along(quintiles)) {
+  col_name <- names(quintiles)[i]
+  cat("Column:", col_name, "\n")
+  if (is.numeric(quintiles[[i]])) {
+    cat("15% Quintile:", quintiles[[i]][1], "\n")
+    cat("50% Quintile:", quintiles[[i]][2], "\n")
+    cat("85% Quintile:", quintiles[[i]][3], "\n\n")
+   } else {
+    cat("Not a numeric column\n\n")
+  }
+}
+Quantity_con_c <- data.frame(calibrate(Concrete_Conditions$Quantity_con, type = "fuzzy", method = "direct",thresholds = thresh_concrete))
+names(Quantity_con_c) <- "Quantity_con_c"
+
+Logistics_con_c <- data.frame(calibrate(Concrete_Conditions$Logistics_con, type = "fuzzy", method = "direct",thresholds = thresh_concrete))
+names(Logistics_con_c) <- "Logistics_con_c"
+
+Concrete_condition_c <- data.frame(calibrate(Concrete_Conditions$Concrete_condition, type = "fuzzy", method = "direct",thresholds = thresh_concrete))
+names(Concrete_condition_c) <- "Concrete_condition_c"
+
+#Concrete_quantity_c <- data.frame(calibrate(Concrete_Conditions$Concrete_quantity, type = "fuzzy", method = "direct",thresholds = thresh_concrete))
+#names(Concrete_quantity_c) <- "Concrete_quantity_c"
+
+#Concrete_logistics_c <- data.frame(calibrate(Concrete_Conditions$Concrete_logistics, type = "fuzzy", method = "direct",thresholds = thresh_concrete))
+#names(Concrete_logistics_c) <- "Concrete_logistics_c"
+
+Concrete_documentation_c <- data.frame(calibrate(Concrete_Conditions$Concrete_documentation, type = "fuzzy", method = "direct",thresholds = thresh_concrete))
+names(Concrete_documentation_c) <- "Concrete_documentation_c"
+
+Concrete_outcome_c <- data.frame(calibrate(Concrete_Conditions$Concrete_outcome, type = "fuzzy", method = "direct",thresholds = thresh_concrete))
+names(Concrete_outcome_c) <- "Concrete_outcome_c"
+
+Concrete_Conditions_c <- cbind(General_Conditions_c, Concrete_condition_c, setNames(Quantity_con_c, names(Quantity_con_c)), setNames(Logistics_con_c, names(Logistics_con_c)),  setNames(Concrete_documentation_c, names(Concrete_documentation_c)), setNames(Concrete_outcome_c, names(Concrete_outcome_c)))
+```
+# Add 0.001 to all 0.5:
+```{r}
+Concrete_Conditions_c[Concrete_Conditions_c == 0.5] <- Concrete_Conditions_c[Concrete_Conditions_c == 0.5] +
+  0.001
+```
+# Necessity Analysis: 
+```{r}
+conds_concrete <- subset(Concrete_Conditions_c, select = c("General_load_capacity_c","General_flexibility_c","Concrete_condition_c", "Quantity_con_c",  "Logistics_con_c", "Concrete_documentation_c"))
+pof(conds_concrete, "Concrete_outcome_c", Concrete_Conditions_c, relation = "nec")
+```
+# Sufficiency Analysis: 
+```{r}
+pof(conds_concrete, "Concrete_outcome_c", Concrete_Conditions_c, relation = "suf")
+```
+
+# Truth Tables:
+```{r}
+ttCONCRETE <- truthTable(data=Concrete_Conditions_c , outcome = "Concrete_outcome_c", conditions = c("General_load_capacity_c","General_flexibility_c","Concrete_condition_c", "Quantity_con_c",  "Logistics_con_c", "Concrete_documentation_c"), incl.cut = 0.79, n.cut = 1, sort.by="incl, n", complete=FALSE, show.cases=TRUE, pri.cut = 0.65)
+print(ttCONCRETE)
+```
+# Robustness Test
+```{r}
+ttCONCRETE_rob <- truthTable(data=Concrete_Conditions_c , outcome = "Concrete_outcome_c", conditions = c("General_load_capacity_c","General_flexibility_c","Concrete_condition_c", "Quantity_con_c",  "Logistics_con_c", "Concrete_documentation_c"), incl.cut = 0.75, n.cut = 1, sort.by="incl, n", complete=FALSE, show.cases=TRUE, pri.cut = 0.65)
+print(ttCONCRETE)
+# Conservative solution
+csCONCRETE <- minimize(ttCONCRETE_rob, details=TRUE, show.cases=TRUE)
+print(csCONCRETE)
+# Parsimonious solution:
+psCONCRETE <- minimize(ttCONCRETE_rob, include="?", details=TRUE, show.cases=TRUE) 
+print(psCONCRETE)
+
+```
+
+# Minimze Truth table:
+```{r}
+# Conservative solution
+csCONCRETE <- minimize(ttCONCRETE, details=TRUE, show.cases=TRUE)
+print(csCONCRETE)
+# Parsimonious solution:
+psCONCRETE <- minimize(ttCONCRETE, include="?", details=TRUE, show.cases=TRUE) 
+print(psCONCRETE)
+```
+# Analysis Flexibility
+```{r}
+Flex_thresh = "e=2.25, c = 2.8, i=4.5"
+
+General_flexibility_span <- data.frame(rowMeans(General[,33:38], na.rm = TRUE))
+names(General_flexibility_span) <- "General_flexibility_span"
+
+General_flexibility_costs <- data.frame(rowMeans(General[,39:44], na.rm = TRUE))
+names(General_flexibility_costs) <- "General_flexibility_costs"
+
+Flexibiliy_total <- cbind(General_flexibility_span,General_flexibility_costs)
+
+# Calibrate
+General_flexibility_span_c <- data.frame(calibrate(Flexibiliy_total$General_flexibility_span, type = "fuzzy", method = "direct",thresholds = Flex_thresh))
+names(General_flexibility_span_c) <- "General_flexibility_span_c"
+
+General_flexibility_costs_c <- data.frame(calibrate(Flexibiliy_total$General_flexibility_costs, type = "fuzzy", method = "direct",thresholds = Flex_thresh))
+names(General_flexibility_costs_c) <- "General_flexibility_costs_c"
+
+Concrete_outcome_c <- data.frame(calibrate(Concrete_Conditions$Concrete_outcome, type = "fuzzy", method = "direct",thresholds = Flex_thresh))
+names(Concrete_outcome_c) <- "Concrete_outcome_c"
+
+Flexibiliy_total_c <- cbind(General_flexibility_span_c,General_flexibility_costs_c, Concrete_outcome_c)
+
+Flexibiliy_total_c[Flexibiliy_total_c == 0.5] <- Flexibiliy_total_c[Flexibiliy_total_c == 0.5] + 0.001
+
+# Truth Table
+conds_flex <- subset(Flexibiliy_total_c, select = c("General_flexibility_costs_c","General_flexibility_span_c"))
+pof(conds_flex, "Concrete_outcome_c", Flexibiliy_total_c, relation = "nec")
+
+
+ttFlex_s <- truthTable(data=Flexibiliy_total_c, outcome = "Concrete_outcome_c", conditions =  c("General_flexibility_costs_c","General_flexibility_span_c"), incl.cut = 0.79, n.cut = 1, sort.by="incl, n", complete=FALSE, show.cases=TRUE) 
+print(ttFlex_s)
+
+# Conservative solution
+csFLEX <- minimize(ttFlex_s, details=TRUE, show.cases=TRUE)
+print(csFLEX)
+# Parsimonious solution:
+psFLEX <- minimize(ttFlex_s, include="?", details=TRUE, show.cases=TRUE)
+print(psFLEX)
+
+# An owners is willing to pay the following percentage more to maximize to amount of reused elements:
+General_flexibility_costs_6 <- data.frame(General[6,39:44])
+General_flexibility_costs_6 <- data.frame(t(General_flexibility_costs_6))
+General_flexibility_costs_7 <- data.frame(General[7,39:44])
+General_flexibility_costs_7 <- data.frame(t(General_flexibility_costs_7))
+General_flexibility_costs_10 <- data.frame(General[10,39:44])
+General_flexibility_costs_10 <- data.frame(t(General_flexibility_costs_10))
+General_flexibility_costs_9 <- data.frame(General[9,39:44])
+General_flexibility_costs_9 <- data.frame(t(General_flexibility_costs_9))
+General_flexibility_costs <- cbind(General_flexibility_costs_6, General_flexibility_costs_7, General_flexibility_costs_9, General_flexibility_costs_10)
+General_flexibility_costs <- data.frame(rowMeans(General_flexibility_costs))
+names(General_flexibility_costs) <- "General_flexibility_costs"
+General_flexibility_costs_c <- data.frame(calibrate(General_flexibility_costs$General_flexibility_costs, type = "fuzzy", method = "direct",thresholds = Flex_thresh))
+neg_cost_flex <- 1-General_flexibility_costs_c
+names(neg_cost_flex) <- "neg_cost_flex"
+rownames(neg_cost_flex) <- c("5%", "10%", "15%", "20%", "25%", "30%")
+## General_flexibility_costs_c
+points <- neg_cost_flex$neg_cost_flex
+row_names <- rownames(neg_cost_flex) 
+plot(1:length(points), points, pch = 16, col = "blue", ylim = c(0, max(points)), ylab = "Value", xlab = "", xaxt = "n")
+axis(1, at = 1:length(points), labels = row_names)
+title(main = "neg_cost_flex case 6,7,9,10")
+grid()
+
+# A owner is willing to sacrifice the following percentage of the structural span to maximise reuse:
+General_flexibility_span_6 <- data.frame(General[6,33:38])
+General_flexibility_span_6 <- data.frame(t(General_flexibility_span_6))
+General_flexibility_span_7 <- data.frame(General[7,33:38])
+General_flexibility_span_7 <- data.frame(t(General_flexibility_span_7))
+General_flexibility_span_10 <- data.frame(General[10,33:38])
+General_flexibility_span_10 <- data.frame(t(General_flexibility_span_10))
+General_flexibility_span_9 <- data.frame(General[9,33:38])
+General_flexibility_span_9 <- data.frame(t(General_flexibility_span_9))
+General_flexibility_span <- cbind(General_flexibility_span_6, General_flexibility_span_7, General_flexibility_span_9, General_flexibility_span_10)
+General_flexibility_span <- data.frame(rowMeans(General_flexibility_span))
+names(General_flexibility_span) <- "General_flexibility_span"
+General_flexibility_span_c <- data.frame(calibrate(General_flexibility_span$General_flexibility_span, type = "fuzzy", method = "direct",thresholds = Flex_thresh))
+names(General_flexibility_span_c) <- "General_flexibility_span_c"
+rownames(General_flexibility_span_c) <- c("5%", "10%", "15%", "20%", "25%", "30%")
+## General_flexibility_costs_c
+points <- General_flexibility_span_c$General_flexibility_span_c
+row_names <- rownames(General_flexibility_span_c) 
+plot(1:length(points), points, pch = 16, col = "blue", ylim = c(0, max(points)), ylab = "Value", xlab = "", xaxt = "n")
+axis(1, at = 1:length(points), labels = row_names)
+title(main = "General_flexibility_span_c case 1,5,9,12")
+grid()
+```
+# Analysis Documentation
+```{r}
+# One needs the following information to decide whether a steel element is worth testing:
+
+
+Documentation_6 <- data.frame(Concrete[6, 50:53])
+Documentation_6 <- data.frame(t(Documentation_6))
+Documentation_7 <- data.frame(Concrete[7, 50:53])
+Documentation_7 <- data.frame(t(Documentation_7))
+Documentation_10 <- data.frame(Concrete[10, 50:53])
+Documentation_10 <- data.frame(t(Documentation_10))
+Documentation_9 <- data.frame(Concrete[9, 50:53])
+Documentation_9 <- data.frame(t(Documentation_9))
+Documentation_cases <- cbind(Documentation_6, Documentation_7, Documentation_9, Documentation_10)
+Documentation_cases <- data.frame(rowMeans(Documentation_cases))
+names(Documentation_cases) <- "Documentation_cases"
+Documentation_cases_c <- data.frame(calibrate(Documentation_cases$Documentation_cases, type = "fuzzy", method = "direct",thresholds = Flex_thresh))
+names(Documentation_cases_c) <- "Documentation_cases_c"
+rownames(Documentation_cases_c) <- c("Concrete Cover", "Concrete Cover \n + concrete class", "Concrete Cover + \n concrete class + reinf. plans", "more")
+## General_flexibility_costs_c
+points <- Documentation_cases_c$Documentation_cases_c
+row_names <- rownames(Documentation_cases_c) 
+plot(1:length(points), points, pch = 16, col = "blue", ylim = c(0, max(points)), ylab = "Value", xlab = "", xaxt = "n")
+text(1:length(points), par("usr")[3]-0.1, 
+     srt = 0, adj = 0.25, xpd = TRUE,
+     labels = row_names, cex = 0.8)
+axis(1, at = 1:length(points), labels = FALSE)
+title(main = "Documentation_cases_c case 6, 7, 9 and 10 ")
+grid()
+```
+# Generate LaTeX table code
+```{r}
+#Region_latex <- knitr::kable(Region, format = "latex")
+#Experience_latex <- knitr::kable(Experience, format = "latex")
+#Profession_latex <- knitr::kable(Profession, format = "latex")
+# Install and load the xtable package
+#install.packages("xtable")
+#library(xtable)
+
+plot(General_Conditions$General_load_capacity,Concrete_Conditions_c$General_load_capacity_c)
+plot(General_Conditions$General_flexibility,Concrete_Conditions_c$General_flexibility_c)
+plot(Concrete_Conditions$Concrete_condition,Concrete_Conditions_c$Concrete_condition_c)
+plot(Concrete_Conditions$Quantity_con,Concrete_Conditions_c$Quantity_con_c)
+plot(Concrete_Conditions$Logistics_con,Concrete_Conditions_c$Logistics_con_c)
+plot(Concrete_Conditions$Concrete_documentation,Concrete_Conditions_c$Concrete_documentation_c)
+
+```
+# Testing common method bias -> only if enough time
+```{r}
+# Single Factor Harman's Test:
+Harman_concrete <- principal(Concrete_Conditions_c, nfactors = 1, residuals = TRUE)
+
+# Print the results
+print(Harman_concrete) # PCI:0.28
+
+# Correlation matrix
+cor_matrix_Concrete <- cor(Concrete_Conditions_c) # 0.67551601
+
+# Print the correlation matrix
+#print(cor_matrix)
+#max_corr <- max(cor_matrix_Wood) # Wood: 0.621; Steel:0.46892884; Concrete: 0.981933463 -> high correlation between concrete elements (prefabricated, cast-in-place, quantity...)
+#print(max_corr)
+
+
+```
+# Testing Robustness: change threshold (frequency, consistency) or calibration thresholds
+```{r}
+```
+# Analysis Condition:
+```{r}
+
+Concrete_condition_carb <- data.frame(colMeans(Concrete[, 1:4], na.rm = TRUE))
+names(Concrete_condition_carb) <- "Concrete_condition_carb"
+rownames(Concrete_condition_carb) <- c("0.5cm","1cm","2cm","3cm")
+points <- Concrete_condition_carb$Concrete_condition_carb
+row_names <- rownames(Concrete_condition_carb) 
+plot(1:length(points), points, pch = 16, col = "blue", ylim = c(0, max(points)), ylab = "Value", xlab = "", xaxt = "n")
+text(1:length(points), par("usr")[3]-0.1, 
+     srt = 0, adj = 0.25, xpd = TRUE,
+     labels = row_names, cex = 0.8)
+axis(1, at = 1:length(points), labels = FALSE)
+title(main = "Concrete_condition_carb")
+grid()
+
+
+Concrete_condition_cover <- data.frame(colMeans(Concrete[, 5:7], na.rm = TRUE))
+names(Concrete_condition_cover) <- "Concrete_condition_cover"
+rownames(Concrete_condition_cover) <- c("Recycled","Reused","Reinforced and Reused")
+points <- Concrete_condition_cover$Concrete_condition_cover
+row_names <- rownames(Concrete_condition_cover) 
+plot(1:length(points), points, pch = 16, col = "blue", ylim = c(0, max(points)), ylab = "Value", xlab = "", xaxt = "n")
+text(1:length(points), par("usr")[3]-0.1, 
+     srt = 0, adj = 0.25, xpd = TRUE,
+     labels = row_names, cex = 0.8)
+axis(1, at = 1:length(points), labels = FALSE)
+title(main = "Concrete_condition_cover ")
+grid()
+
+Concrete_condition_reinf <- data.frame(colMeans(Concrete[, 8:10], na.rm = TRUE))
+names(Concrete_condition_reinf) <- "Concrete_condition_reinf"
+rownames(Concrete_condition_reinf) <- c("Recycled","Reused","Reinforced and Reused")
+points <- Concrete_condition_reinf$Concrete_condition_reinf
+row_names <- rownames(Concrete_condition_reinf) 
+plot(1:length(points), points, pch = 16, col = "blue", ylim = c(0, max(points)), ylab = "Value", xlab = "", xaxt = "n")
+text(1:length(points), par("usr")[3]-0.1, 
+     srt = 0, adj = 0.25, xpd = TRUE,
+     labels = row_names, cex = 0.8)
+axis(1, at = 1:length(points), labels = FALSE)
+title(main = "Concrete_condition_reinf")
+grid()
+
+Concrete_condition_age <- data.frame(colMeans(Concrete[, 11:16], na.rm = TRUE))
+names(Concrete_condition_age) <- "Concrete_condition_age"
+rownames(Concrete_condition_age) <- c("1-10 years","11-20 years","21-30 years","31-40 years","41-50 years","51-60 years")
+points <- Concrete_condition_age$Concrete_condition_age
+row_names <- rownames(Concrete_condition_age) 
+plot(1:length(points), points, pch = 16, col = "blue", ylim = c(0, max(points)), ylab = "Value", xlab = "", xaxt = "n")
+text(1:length(points), par("usr")[3]-0.1, 
+     srt = 0, adj = 0.25, xpd = TRUE,
+     labels = row_names, cex = 0.8)
+axis(1, at = 1:length(points), labels = FALSE)
+title(main = "Concrete_condition_age")
+grid()
+
+```
+
