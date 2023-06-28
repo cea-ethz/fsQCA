@@ -24,7 +24,6 @@ library(forcats)
 ```{r}
 # Open data file  
 datafile <- read.csv("/Users/fionageorginahansen/Desktop/ETH\ Zürich/Master/4.\ Semester/fsQCA/Results/Results.csv")
-#datafile[datafile == ""] <- NA # if there are no answers code as I don't know = neither agree nor disagree -> after removing rows w/ less than 80%
 
 # Splitting the table into three parts: 1 analysis per material  
 Demographic <- datafile[,3:5]
@@ -205,7 +204,7 @@ num_rows_General <- nrow(General)
 General[General == ""] <- 3 # if there are no answers code as I don't know = neither agree nor disagree ->
 General <- General[!(1:nrow(General) %in% rows_to_delete), ] # Delete row 8 which is less than 80% complete
 
-General <- General[-c(8, 11, 12), ]
+General <- General[-c(8, 11, 12), ] # Delete answers from outside Europe
 
 General <- as.data.frame(sapply(General, as.numeric))
 
@@ -250,9 +249,6 @@ Logistics <- data.frame(rowMeans(Logistics[,], na.rm = TRUE))
 names(Logistics) <- "Logistics"
 
 Wood_Conditions <- cbind(General_Conditions, Wood_condition,setNames(Quantity, names(Quantity)), setNames(Logistics, names(Logistics)), setNames(Wood_documentation, names(Wood_documentation)),setNames(Wood_outcome, names(Wood_outcome)))
-
-
-#Wood_Conditions <- cbind(Wood_condition,setNames(Wood_quantity, names(Wood_quantity)), setNames(Wood_logistics, names(Wood_logistics)), setNames(Wood_documentation, names(Wood_documentation)),setNames(Wood_outcome, names(Wood_outcome)))
 ```
 # GENERAL: Calibrate to fuzzy set: absolute approach
 ```{r}
@@ -281,21 +277,7 @@ for (i in seq_along(quintiles)) {
   }
 }
   
-#General_load_capacity_c <- data.frame(calibrate(General_Conditions$General_load_capacity, type = "fuzzy", method = "direct", thresholds = thresh_wood))
-#names(General_load_capacity_c) <- "General_load_capacity_c"
 
-#General_quantity_c <- data.frame(calibrate(General_Conditions$General_quantity, type = "fuzzy", method = "direct",thresholds = thresh_wood))
-#names(General_quantity_c) <- "General_quantity_c"
-
-#General_logistics_c <- data.frame(calibrate(General_Conditions$General_logistics, type = "fuzzy", method = "direct",thresholds = thresh_wood))
-#names(General_logistics_c) <- "General_logistics_c"
-
-#General_flexibility_c <- data.frame(calibrate(General_Conditions$General_flexibility, type = "fuzzy", method = "direct",thresholds = thresh_wood))
-#names(General_flexibility_c) <- "General_flexibility_c"
-
-#General_Conditions_c <- cbind(General_load_capacity_c, setNames(General_quantity_c, names(General_quantity_c)), setNames(General_logistics_c, names(General_logistics_c)), setNames(General_flexibility_c, names(General_flexibility_c)))
-
-#General_Conditions_c <- cbind(General_load_capacity_c, setNames(General_flexibility_c, names(General_flexibility_c)))
 ```
 # WOOD: Calibrate to fuzzy set: absolute approach
 ```{r}
@@ -334,9 +316,6 @@ names(Wood_condition_c) <- "Wood_condition_c"
 Quantity_c <- data.frame(calibrate(Wood_Conditions$Quantity, type = "fuzzy", method = "direct",thresholds = thresh_wood))
 names(Quantity_c) <- "Quantity_c"
 
-#Wood_quantity_c <- data.frame(calibrate(Wood_Conditions$Wood_quantity, type = "fuzzy", method = "direct",thresholds = thresh_wood))
-#names(Wood_quantity_c) <- "Wood_quantity_c"
-
 Logistics_c <- data.frame(calibrate(Wood_Conditions$Logistics, type = "fuzzy", method = "direct",thresholds = thresh_wood))
 names(Logistics_c) <- "Logistics_c"
 
@@ -357,8 +336,6 @@ Wood_Conditions_c[Wood_Conditions_c == 0.5] <- Wood_Conditions_c[Wood_Conditions
 ```{r}
 conds_wood <- subset(Wood_Conditions_c, select = c("General_load_capacity_c","General_flexibility_c","Wood_condition_c", "Quantity_c", "Logistics_c", "Wood_documentation_c"))
 pof(conds_wood, "Wood_outcome_c", Wood_Conditions_c, relation = "nec")
-
-
 ```
 # Sufficiency Analysis: 
 ```{r}
@@ -371,14 +348,14 @@ pof(conds_wood, "Wood_outcome_c", Wood_Conditions_c, relation = "suf")
 ttWOOD <- truthTable(data=Wood_Conditions_c, outcome = "Wood_outcome_c", conditions = c("General_load_capacity_c","General_flexibility_c","Wood_condition_c", "Quantity_c", "Logistics_c", "Wood_documentation_c"), incl.cut = 0.79, n.cut = 1, sort.by="incl, n", complete = FALSE, show.cases=TRUE, pri.cut = 0.65)
 print(ttWOOD)
 ```
+# Minimze Truth table:
 ```{r}
-#plot(Wood_Conditions$Wood_condition,1:13)
-#plot(Wood_Conditions$Wood_quantity,1:13)
-#plot(Wood_Conditions$Wood_logistics,1:13)
-#plot(Wood_Conditions$Wood_documentation,1:13)
-#plot(Wood_Conditions$Wood_quantity,Wood_Conditions_c$Wood_quantity_c)
-#plot(Wood_Conditions$Wood_logistics,Wood_Conditions_c$Wood_logistics_c)
-#plot(Wood_Conditions$Wood_documentation,Wood_Conditions_c$Wood_documentation_c)
+# Conservative solution
+csWOOD <- minimize(ttWOOD, details=TRUE, show.cases=TRUE)
+print(csWOOD)
+# Parsimonious solution:
+psWOOD <- minimize(ttWOOD, include="?", details=TRUE, show.cases=TRUE)
+print(psWOOD)
 ```
 # Robustness Test
 ```{r}
@@ -392,17 +369,6 @@ print(csWOOD)
 psWOOD <- minimize(ttWOOD_rob, include="?", details=TRUE, show.cases=TRUE)
 print(psWOOD)
 ```
-
-# Minimze Truth table:
-```{r}
-# Conservative solution
-csWOOD <- minimize(ttWOOD, details=TRUE, show.cases=TRUE)
-print(csWOOD)
-# Parsimonious solution:
-psWOOD <- minimize(ttWOOD, include="?", details=TRUE, show.cases=TRUE)
-print(psWOOD)
-```
-
 # Generate LaTeX table code
 ```{r}
 Region_latex <- knitr::kable(Region, format = "latex")

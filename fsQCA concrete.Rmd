@@ -24,7 +24,6 @@ library(forcats)
 ```{r}
 # Open data file  
 datafile <- read.csv("/Users/fionageorginahansen/Desktop/ETH\ Zürich/Master/4.\ Semester/fsQCA/Results/Results.csv")
-#datafile[datafile == ""] <- NA # if there are no answers code as I don't know = neither agree nor disagree
 
 # Splitting the table into three parts: 1 analysis per material  
 Demographic <- datafile[,3:5]
@@ -248,7 +247,7 @@ Logistics_con <- cbind(General_logistics, Concrete_logistics)
 Logistics_con <- data.frame(rowMeans(Logistics_con[,], na.rm = TRUE))
 names(Logistics_con) <- "Logistics_con"
 
-Concrete_Conditions <- cbind(Concrete_condition, setNames(Quantity_con, names(Quantity_con)), setNames(Logistics_con, names(Logistics_con)), setNames(Concrete_documentation, names(Concrete_documentation)), setNames(Concrete_outcome, names(Concrete_outcome)))
+Concrete_Conditions <- cbind(General_load_capacity, setNames(General_flexibility, names(General_flexibility)), Concrete_condition, setNames(Quantity_con, names(Quantity_con)), setNames(Logistics_con, names(Logistics_con)), setNames(Concrete_documentation, names(Concrete_documentation)), setNames(Concrete_outcome, names(Concrete_outcome)))
 ```
 # GENERAL: Calibrate to fuzzy set: absolute approach
 ```{r}
@@ -276,19 +275,12 @@ for (i in seq_along(quintiles)) {
   }
 }
   
-General_load_capacity_c <- data.frame(calibrate(General_Conditions$General_load_capacity, type = "fuzzy", method = "direct", thresholds = thresh_concrete))
+General_load_capacity_c <- data.frame(calibrate(Concrete_Conditions$General_load_capacity, type = "fuzzy", method = "direct", thresholds = thresh_concrete))
 names(General_load_capacity_c) <- "General_load_capacity_c"
 
-#General_quantity_c <- data.frame(calibrate(General_Conditions$General_quantity, type = "fuzzy", method = "direct",thresholds = thresh_concrete))
-#names(General_quantity_c) <- "General_quantity_c"
-
-#General_logistics_c <- data.frame(calibrate(General_Conditions$General_logistics, type = "fuzzy", method = "direct",thresholds = thresh_concrete))
-#names(General_logistics_c) <- "General_logistics_c"
-
-General_flexibility_c <- data.frame(calibrate(General_Conditions$General_flexibility, type = "fuzzy", method = "direct",thresholds = thresh_concrete))
+General_flexibility_c <- data.frame(calibrate(Concrete_Conditions$General_flexibility, type = "fuzzy", method = "direct",thresholds = thresh_concrete))
 names(General_flexibility_c) <- "General_flexibility_c"
 
-General_Conditions_c <- cbind(General_load_capacity_c, setNames(General_flexibility_c, names(General_flexibility_c)))
 ```
 # CONCRETE: Calibrate to fuzzy set: absolute approach
 ```{r}
@@ -322,12 +314,6 @@ names(Logistics_con_c) <- "Logistics_con_c"
 
 Concrete_condition_c <- data.frame(calibrate(Concrete_Conditions$Concrete_condition, type = "fuzzy", method = "direct",thresholds = thresh_concrete))
 names(Concrete_condition_c) <- "Concrete_condition_c"
-
-#Concrete_quantity_c <- data.frame(calibrate(Concrete_Conditions$Concrete_quantity, type = "fuzzy", method = "direct",thresholds = thresh_concrete))
-#names(Concrete_quantity_c) <- "Concrete_quantity_c"
-
-#Concrete_logistics_c <- data.frame(calibrate(Concrete_Conditions$Concrete_logistics, type = "fuzzy", method = "direct",thresholds = thresh_concrete))
-#names(Concrete_logistics_c) <- "Concrete_logistics_c"
 
 Concrete_documentation_c <- data.frame(calibrate(Concrete_Conditions$Concrete_documentation, type = "fuzzy", method = "direct",thresholds = thresh_concrete))
 names(Concrete_documentation_c) <- "Concrete_documentation_c"

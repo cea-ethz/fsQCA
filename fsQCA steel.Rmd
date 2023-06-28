@@ -24,8 +24,7 @@ library(forcats)
 ```{r}
 # Open data file  
 datafile <- read.csv("/Users/fionageorginahansen/Desktop/ETH\ Zürich/Master/4.\ Semester/fsQCA/Results/Results.csv")
-#datafile[datafile == ""] <- NA # if there are no answers code as I don't know = neither agree nor disagree
-
+s
 # Splitting the table into three parts: 1 analysis per material  
 Demographic <- datafile[,3:5]
 General_0 <- datafile[,6:49]
@@ -284,12 +283,6 @@ for (i in seq_along(quintiles)) {
 General_load_capacity_c <- data.frame(calibrate(General_Conditions$General_load_capacity, type = "fuzzy", method = "direct", thresholds = thresh_steel))
 names(General_load_capacity_c) <- "General_load_capacity_c"
 
-#General_quantity_c <- data.frame(calibrate(General_Conditions$General_quantity, type = "fuzzy", method = "direct",thresholds = thresh_steel))
-#names(General_quantity_c) <- "General_quantity_c"
-
-#General_logistics_c <- data.frame(calibrate(General_Conditions$General_logistics, type = "fuzzy", method = "direct",thresholds = thresh_steel))
-#names(General_logistics_c) <- "General_logistics_c"
-
 General_flexibility_c <- data.frame(calibrate(General_Conditions$General_flexibility, type = "fuzzy", method = "direct",thresholds = thresh_steel))
 names(General_flexibility_c) <- "General_flexibility_c"
 
@@ -328,12 +321,6 @@ names(Logistics_s_c) <- "Logistics_s_c"
 
 Steel_condition_c <- data.frame(calibrate(Steel_Conditions$Steel_condition, type = "fuzzy", method = "direct",thresholds = thresh_steel))
 names(Steel_condition_c) <- "Steel_condition_c"
-
-#Steel_quantity_c <- data.frame(calibrate(Steel_Conditions$Steel_quantity, type = "fuzzy", method = "direct",thresholds = thresh_steel))
-#names(Steel_quantity_c) <- "Steel_quantity_c"
-
-#Steel_logistics_c <- data.frame(calibrate(Steel_Conditions$Steel_logistics, type = "fuzzy", method = "direct",thresholds = thresh_steel))
-#names(Steel_logistics_c) <- "Steel_logistics_c"
 
 Steel_documentation_c <- data.frame(calibrate(Steel_Conditions$Steel_documentation, type = "fuzzy", method = "direct",thresholds = thresh_steel))
 names(Steel_documentation_c) <- "Steel_documentation_c"
@@ -643,20 +630,49 @@ cor_matrix_Steel <- cor(Steel_Conditions_c) # 0.8240671
 # Analysis Quantity:
 ```{r}
 
-Steel_quantity <- data.frame(rowMeans(Steel[, 11:19], na.rm = TRUE))
-names(Steel_quantity) <- "Steel_quantity"
 
-Steel_quantity_careful_disassembly <- data.frame(colMeans(Steel[, 11:15], na.rm = TRUE))
+Steel_quantity_careful_disassembly <- data.frame(rowMeans(Steel[, 11:15], na.rm = TRUE))
 names(Steel_quantity_careful_disassembly) <- "Steel_quantity_careful_disassembly"
-rownames(Steel_quantity_careful_disassembly) <- c("1-20%","21-40%","41-60%","61-80%","81-100%")
-Steel_quantity_sametype_salvageable <- data.frame(colMeans(Steel[, 16:19], na.rm = TRUE))
+#rownames(Steel_quantity_careful_disassembly) <- c("1-20%","21-40%","41-60%","61-80%","81-100%")
+Steel_quantity_sametype_salvageable <- data.frame(rowMeans(Steel[, 16:19], na.rm = TRUE))
 names(Steel_quantity_sametype_salvageable) <- "Steel_quantity_sametype_salvageable"
-rownames(Steel_quantity_sametype_salvageable) <- c("20","40","60","80")
+#rownames(Steel_quantity_sametype_salvageable) <- c("20","40","60","80")
+thresh_quan = "e= 2.6, c=3.01, i=4.2"
 
+General_quantity <- as.data.frame(sapply(General_quantity, as.numeric))
+
+Quantity_General  <- data.frame(calibrate(General_quantity$General_quantity, type = "fuzzy", method = "direct",thresholds = thresh_quan))
+names(Quantity_General) <- "Quantity_General"
+
+Steel_quantity_careful_disassembly <- data.frame(calibrate(Steel_quantity_careful_disassembly$Steel_quantity_careful_disassembly, type = "fuzzy", method = "direct",thresholds = thresh_quan))
+names(Steel_quantity_careful_disassembly) <- "Steel_quantity_careful_disassembly"
+
+Steel_quantity_sametype_salvageable <- data.frame(calibrate(Steel_quantity_sametype_salvageable$Steel_quantity_sametype_salvageable, type = "fuzzy", method = "direct",thresholds = thresh_quan))
+names(Steel_quantity_sametype_salvageable) <- "Steel_quantity_sametype_salvageable"
+
+Steel_outcome_c <- data.frame(calibrate(Steel_Conditions$Steel_outcome, type = "fuzzy", method = "direct",thresholds = thresh_quan))
+names(Steel_outcome_c) <- "Steel_outcome_c"
+
+Quantity_total_c <- cbind(Quantity_General,Steel_quantity_careful_disassembly,Steel_quantity_sametype_salvageable,Steel_outcome_c)
+
+Quantity_total_c[Quantity_total_c == 0.5] <- Quantity_total_c[Quantity_total_c == 0.5] + 0.001
+
+conds_log <- subset(Quantity_total_c, select = c("Quantity_General","Steel_quantity_careful_disassembly","Steel_quantity_sametype_salvageable"))
+
+pof(conds_log, "Steel_outcome_c", Quantity_total_c, relation = "nec")
+
+ttLOG <- truthTable(data=Quantity_total_c, outcome = "Steel_outcome_c", conditions = c("Quantity_General","Steel_quantity_careful_disassembly","Steel_quantity_sametype_salvageable"), incl.cut = 0.79, n.cut = 1, sort.by="incl, n", complete=FALSE, show.cases=TRUE, pri.cut = 0.65) 
+print(ttLOG)
+# Conservative solution
+csLOG <- minimize(ttLOG, details=TRUE, show.cases=TRUE)
+print(csLOG)
+# Parsimonious solution:
+psLOG <- minimize(ttLOG, include="?", details=TRUE, show.cases=TRUE)
+print(psLOG)
 
 points <- Steel_quantity_careful_disassembly$Steel_quantity_careful_disassembly
 row_names <- rownames(Steel_quantity_careful_disassembly) 
-plot(1:length(points), points, pch = 16, col = "blue", ylim = c(0, max(points)), ylab = "fuzzy Value", xlab = "", xaxt = "n")
+#plot(1:length(points), points, pch = 16, col = "blue", ylim = c(0, max(points)), ylab = "fuzzy Value", xlab = "", xaxt = "n")
 text(1:length(points), par("usr")[3]-0.15, 
      srt = 0, adj = 0.25, xpd = TRUE,
      labels = row_names, cex = 0.8)
@@ -666,7 +682,7 @@ grid()
 
 points <- Steel_quantity_sametype_salvageable$Steel_quantity_sametype_salvageable
 row_names <- rownames(Steel_quantity_sametype_salvageable) 
-plot(1:length(points), points, pch = 16, col = "blue", ylim = c(0, max(points)), ylab = "fuzzy Value", xlab = "", xaxt = "n")
+#plot(1:length(points), points, pch = 16, col = "blue", ylim = c(0, max(points)), ylab = "fuzzy Value", xlab = "", xaxt = "n")
 text(1:length(points), par("usr")[3]-0.15, 
      srt = 0, adj = 0.25, xpd = TRUE,
      labels = row_names, cex = 0.8)
